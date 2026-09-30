@@ -24,28 +24,39 @@ python3.pkgs.buildPythonApplication {
       && base != ".pytest_cache"
       && base != ".venv"
       && base != "nix"
-      && base != ".env"
-      && base != ".opencode"
-      && base != "*.log";
+      &&       base != ".env"
+      && base != ".opencode";
     src = ./..;
   };
 
   nativeBuildInputs = with python3.pkgs; [
     setuptools
     wheel
+    pytest
   ];
 
   propagatedBuildInputs = with python3.pkgs; [
     requests
     python-dotenv
+    arxiv
+    habanero
+    httpx
+    biopython
   ];
 
-  # Tests run offline via `nix develop` + pytest; skip testing at package
-  # build time to keep the derivation light.
-  doCheck = false;
+  # Run the offline suite inside the Nix sandbox: it is stricter than
+  # `nix develop` (no PYTHONPATH, no network, only files in `src`), so a green
+  # build here proves the source filter carries README.md/.env.example/scripts/
+  # and that nothing quietly depends on a checkout-only path.
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    pytest tests/ -q
+    runHook postCheck
+  '';
 
   meta = with lib; {
-    description = "researcher-python — Python project scaffold (purpose TBD).";
+    description = "Unified scholarly search pipeline across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed.";
     license = licenses.mit;
     maintainers = [ ];
     mainProgram = "researcher-python";

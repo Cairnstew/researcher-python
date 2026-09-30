@@ -5,12 +5,16 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "researcher-python"
 version = "0.1.0"
-description = "researcher-python — Python project scaffold (purpose TBD)."
+description = "Unified scholarly search: one pipeline across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
     "requests>=2.31",
     "python-dotenv>=1.0",
+    "arxiv>=4.0",
+    "habanero>=2.3",
+    "httpx>=0.27",
+    "biopython>=1.84",
 ]
 
 [project.scripts]

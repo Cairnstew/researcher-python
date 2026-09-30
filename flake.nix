@@ -1,5 +1,5 @@
 {
-  description = "researcher-python — package and dev environment";
+  description = "researcher-python — unified scholarly search pipeline (arXiv, OpenAlex, Semantic Scholar, Crossref, PubMed)";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -36,6 +36,10 @@
           python = pkgs.python3.withPackages (ps: with ps; [
             requests
             python-dotenv
+            arxiv
+            habanero
+            httpx
+            biopython
             pytest
           ]);
         in
@@ -46,7 +50,7 @@
               export PYTHONPATH="$PWD''${PYTHONPATH:+:$PYTHONPATH}"
               echo "researcher-python dev shell"
               python -c 'import researcher_python; print("researcher_python:", researcher_python.__version__)'
-              python -c 'import requests, dotenv, pytest; print("deps: requests, python-dotenv, pytest")'
+              python -c 'import requests, dotenv, arxiv, habanero, httpx, Bio, pytest; print("deps: requests python-dotenv arxiv habanero httpx biopython pytest")'
             '';
           };
         }
