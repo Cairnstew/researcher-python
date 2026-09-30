@@ -1,0 +1,196 @@
+<?xml version="1.0" ?>
+<!--
+  Hand-written fixture: a PubmedArticleSet in NCBI's MEDLINE shape.
+  Four articles so every parser branch is covered offline (D1/D4):
+    1. structured abstract (labelled sections) + inline markup in the title
+    2. legacy MedlineDate instead of Year/Month/Day
+    3. no abstract, CollectiveName-only author
+    4. no DOI of its own, with decoy ArticleTitle/ArticleId nested inside
+       ReferenceList + CommentsCorrections — the D6 regression.
+-->
+<PubmedArticleSet>
+
+  <PubmedArticle>
+    <MedlineCitation Status="MEDLINE" Owner="NLM">
+      <PMID Version="1">30012345</PMID>
+      <Article PubModel="Print">
+        <Journal>
+          <JournalIssue CitedMedium="Internet">
+            <Volume>12</Volume>
+            <Issue>4</Issue>
+            <PubDate>
+              <Year>2021</Year>
+              <Month>Apr</Month>
+              <Day>15</Day>
+            </PubDate>
+          </JournalIssue>
+          <Title>Journal of Testing Things</Title>
+          <ISOAbbreviation>J Test Things</ISOAbbreviation>
+        </Journal>
+        <ArticleTitle>Structured <i>abstract</i> with <sup>markup</sup> inside</ArticleTitle>
+        <Pagination>
+          <MedlinePgn>101-112</MedlinePgn>
+        </Pagination>
+        <ELocationID EIdType="doi" ValidYN="Y">10.1234/Struct.Fallback</ELocationID>
+        <Abstract>
+          <AbstractText Label="BACKGROUND" NlmCategory="OBJECTIVE">Background text goes here.</AbstractText>
+          <AbstractText Label="METHODS" NlmCategory="METHODS">Methods text goes here.</AbstractText>
+          <AbstractText NlmCategory="RESULTS">Results without a label.</AbstractText>
+          <CopyrightInformation>(c) 2021.</CopyrightInformation>
+        </Abstract>
+        <AuthorList CompleteYN="Y">
+          <Author ValidYN="Y">
+            <LastName>Smith</LastName>
+            <ForeName>John A</ForeName>
+            <Initials>JA</Initials>
+            <AffiliationInfo>
+              <Affiliation>Department of Testing, Example University.</Affiliation>
+            </AffiliationInfo>
+          </Author>
+          <Author ValidYN="Y">
+            <LastName>García</LastName>
+            <ForeName>María</ForeName>
+            <Identifier Source="ORCID">https://orcid.org/0000-0002-1825-0097</Identifier>
+          </Author>
+        </AuthorList>
+        <Language>eng</Language>
+        <PublicationTypeList>
+          <PublicationType UI="D016428">Journal Article</PublicationType>
+        </PublicationTypeList>
+      </Article>
+      <KeywordList Owner="NLM">
+        <Keyword MajorTopicYN="N">testing</Keyword>
+        <Keyword MajorTopicYN="Y">fixtures</Keyword>
+      </KeywordList>
+      <MeshHeadingList>
+        <MeshHeading>
+          <DescriptorName UI="D000001">Test Methods</DescriptorName>
+        </MeshHeading>
+      </MeshHeadingList>
+    </MedlineCitation>
+    <PubmedData>
+      <PublicationStatus>epub</PublicationStatus>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">30012345</ArticleId>
+        <ArticleId IdType="doi">10.1234/struct.2021</ArticleId>
+        <ArticleId IdType="pmc">PMC7001234</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+
+  <PubmedArticle>
+    <MedlineCitation Status="MEDLINE" Owner="NLM">
+      <PMID Version="1">30012346</PMID>
+      <Article PubModel="Print-Electronic">
+        <Journal>
+          <JournalIssue CitedMedium="Print">
+            <PubDate>
+              <MedlineDate>2019 Dec-2020 Jan</MedlineDate>
+            </PubDate>
+          </JournalIssue>
+          <Title>Quarterly Annals of Legacy Records</Title>
+        </Journal>
+        <ArticleTitle>Legacy record carrying a MedlineDate</ArticleTitle>
+        <AuthorList CompleteYN="Y">
+          <Author ValidYN="Y">
+            <LastName>Chen</LastName>
+            <ForeName>Wei</ForeName>
+          </Author>
+        </AuthorList>
+        <Language>eng</Language>
+        <PublicationTypeList>
+          <PublicationType UI="D016428">Journal Article</PublicationType>
+        </PublicationTypeList>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">30012346</ArticleId>
+        <ArticleId IdType="doi">10.5555/Legacy.2019</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+
+  <PubmedArticle>
+    <MedlineCitation Status="MEDLINE" Owner="NLM">
+      <PMID Version="1">30012347</PMID>
+      <Article PubModel="Electronic">
+        <Journal>
+          <JournalIssue CitedMedium="Internet">
+            <PubDate>
+              <Year>2018</Year>
+              <Month>Nov</Month>
+            </PubDate>
+          </JournalIssue>
+          <Title>Collective Authorship Reports</Title>
+        </Journal>
+        <ArticleTitle>Report of the Working Group on Names</ArticleTitle>
+        <AuthorList CompleteYN="Y">
+          <Author ValidYN="Y">
+            <CollectiveName>Working Group on Names</CollectiveName>
+          </Author>
+        </AuthorList>
+        <Language>eng</Language>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">30012347</ArticleId>
+      </ArticleIdList>
+    </PubmedData>
+  </PubmedArticle>
+
+  <PubmedArticle>
+    <MedlineCitation Status="MEDLINE" Owner="NLM">
+      <PMID Version="1">30012348</PMID>
+      <Article PubModel="Print">
+        <Journal>
+          <JournalIssue CitedMedium="Print">
+            <PubDate>
+              <Year>2020</Year>
+            </PubDate>
+          </JournalIssue>
+          <Title>Decoy Detection Quarterly</Title>
+        </Journal>
+        <ArticleTitle>The correct top-level title</ArticleTitle>
+        <Pagination>
+          <MedlinePgn>7-9</MedlinePgn>
+        </Pagination>
+        <AuthorList CompleteYN="Y">
+          <Author ValidYN="Y">
+            <LastName>Nguyen</LastName>
+            <ForeName>Linh</ForeName>
+          </Author>
+        </AuthorList>
+        <CommentsCorrectionsList>
+          <CommentsCorrections RefType="CommentIn">
+            <RefSource>An unrelated comment</RefSource>
+            <PMID Version="1">30099999</PMID>
+          </CommentsCorrections>
+        </CommentsCorrectionsList>
+      </Article>
+    </MedlineCitation>
+    <PubmedData>
+      <ArticleIdList>
+        <ArticleId IdType="pubmed">30012348</ArticleId>
+      </ArticleIdList>
+      <ReferenceList>
+        <Reference>
+          <Citation>
+            <ArticleTitle>A nested decoy title that must not win</ArticleTitle>
+            <Journal>
+              <Title>Decoy Journal</Title>
+              <JournalIssue>
+                <PubDate><Year>1999</Year></PubDate>
+              </JournalIssue>
+            </Journal>
+          </Citation>
+          <ArticleIdList>
+            <ArticleId IdType="doi">10.9999/decoy.doi</ArticleId>
+          </ArticleIdList>
+        </Reference>
+      </ReferenceList>
+    </PubmedData>
+  </PubmedArticle>
+
+</PubmedArticleSet>
