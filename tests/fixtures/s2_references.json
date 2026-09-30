@@ -1,0 +1,38 @@
+{
+  "total": 3,
+  "offset": 0,
+  "next": null,
+  "data": [
+    {
+      "citedPaper": {
+        "title": "Deep Residual Learning for Image Recognition",
+        "abstract": "Deeper neural networks are more difficult to train.",
+        "year": 2016,
+        "authors": [
+          { "authorId": "1562156", "name": "Kaiming He" },
+          { "authorId": "1562157", "name": "Xiangyu Zhang" }
+        ],
+        "externalIds": { "ArXiv": "1512.03385" },
+        "venue": "CVPR",
+        "openAccessPdf": {
+          "url": "https://arxiv.org/pdf/1512.03385",
+          "status": "GREEN"
+        },
+        "citationCount": 120000
+      }
+    },
+    { "citedPaper": null },
+    {
+      "citedPaper": {
+        "title": "A record with no external ids at all",
+        "abstract": null,
+        "year": null,
+        "authors": null,
+        "externalIds": null,
+        "venue": "",
+        "openAccessPdf": null,
+        "citationCount": null
+      }
+    }
+  ]
+}

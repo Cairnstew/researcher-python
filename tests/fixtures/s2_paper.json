@@ -1,0 +1,22 @@
+{
+  "paperId": "7c8b9d0e1f2a3b4c5d6e7f8091a2b3c4d5e6f708",
+  "title": "ImageNet Classification with Deep Convolutional Neural Networks",
+  "abstract": "We trained a large deep convolutional neural network to classify the 1.2 million high-resolution images in the ImageNet LSVRC-2010 contest into the 1000 different object classes.",
+  "year": 2017,
+  "authors": [
+    { "authorId": "145963066", "name": "Alex Krizhevsky" },
+    { "authorId": "145963067", "name": "Ilya Sutskever" },
+    { "authorId": "145963068", "name": "Geoffrey E. Hinton" }
+  ],
+  "externalIds": {
+    "MAG": "110775357",
+    "DOI": "10.1145/3065386",
+    "ArXiv": "1409.0576"
+  },
+  "venue": "Communications of the ACM",
+  "openAccessPdf": {
+    "url": "https://dl.acm.org/doi/pdf/10.1145/3065386",
+    "status": "GREEN"
+  },
+  "citationCount": 98765
+}
