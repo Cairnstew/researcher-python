@@ -32,6 +32,6 @@ the network; everything below must pass from a clean checkout.
 Report each command's result. If a test fails, fix it before reporting done —
 do not summarize around a red suite.
 
-Context: this is a scaffold (purpose TBD). If you are adding a feature, first
+Context: this is a scholarly-search package with five API adapters. If you are adding a feature, first
 read `README.md`'s *Extending* section — every new runtime dependency lands in
 three places (`pyproject.toml`, `nix/default.nix`, the `flake.nix` dev shell).
