@@ -1,0 +1,89 @@
+{
+  "DOI": "10.1103/PhysRevLett.116.061102",
+  "type": "journal-article",
+  "title": ["A synthetic Crossref work used by the offline parser tests"],
+  "container-title": ["Physical Review Letters"],
+  "short-container-title": ["Phys. Rev. Lett."],
+  "abstract": "<jats:p>Abstract prose with <jats:italic>emphasis</jats:italic> and the entity &#x2010; inside.</jats:p>",
+  "author": [
+    {
+      "given": "Ada",
+      "family": "Lovelace",
+      "sequence": "first",
+      "ORCID": "https://orcid.org/0000-0002-1825-0097",
+      "affiliation": [
+        { "name": "Analytical Engine Institute" },
+        { "name": "Second Affiliation" }
+      ]
+    },
+    {
+      "given": "Alan",
+      "family": "Turing",
+      "sequence": "additional",
+      "affiliation": [
+        { "name": "University of Manchester" }
+      ]
+    }
+  ],
+  "issued": { "date-parts": [[2016, 2, 11]] },
+  "published": { "date-parts": [[2016, 2, 11]] },
+  "published-print": { "date-parts": [[2016, 2, 11]] },
+  "created": {
+    "date-parts": [[2016, 1, 7]],
+    "date-time": "2016-01-07T11:02:45Z"
+  },
+  "URL": "https://doi.org/10.1103/PhysRevLett.116.061102",
+  "publisher": "American Physical Society (APS)",
+  "volume": "116",
+  "issue": "6",
+  "page": "061102",
+  "reference-count": 4,
+  "is-referenced-by-count": 1234,
+  "subject": ["Physics and Astronomy (all)"],
+  "language": "en",
+  "ISSN": ["0031-9007", "1079-7114"],
+  "license": [
+    {
+      "URL": "https://journals.aps.org/copyright",
+      "content-version": "vor",
+      "delay-in-days": 0
+    }
+  ],
+  "link": [
+    {
+      "URL": "https://journals.aps.org/prl/pdf/10.1103/PhysRevLett.116.061102",
+      "content-type": "application/pdf",
+      "intended-application": "text-mining"
+    }
+  ],
+  "reference": [
+    {
+      "key": "Ref1",
+      "DOI": "10.1103/PhysRev.136.B1630",
+      "doi-asserted-by": "publisher",
+      "first-page": "B1630",
+      "volume": "136",
+      "journal-title": "Phys. Rev."
+    },
+    {
+      "key": "Ref2",
+      "unstructured": "A. Author and B. Author, Journal1, 2-3 (1999)."
+    },
+    {
+      "key": "Ref3",
+      "author": "Erdos, P.",
+      "year": "1959",
+      "first-page": "17",
+      "volume": "6",
+      "journal-title": "Publ. Math. Debrecen"
+    },
+    {
+      "key": "Ref4",
+      "DOI": "10.1000/xyz123",
+      "article-title": "A cited work title",
+      "author": "Smith, J.",
+      "year": "2001",
+      "first-page": "101"
+    }
+  ]
+}
