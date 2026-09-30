@@ -1,0 +1,87 @@
+{
+  "id": "https://openalex.org/W2029604167",
+  "doi": "https://doi.org/10.1371/journal.pone.0033693",
+  "ids": {
+    "openalex": "https://openalex.org/W2029604167",
+    "doi": "https://doi.org/10.1371/journal.pone.0033693",
+    "pmid": "https://pubmed.ncbi.nlm.nih.gov/22470460",
+    "pmcid": "https://pmc.ncbi.nlm.nih.gov/articles/PMC3325049"
+  },
+  "display_name": "Sample article title from OpenAlex",
+  "title": "Sample article title from OpenAlex",
+  "publication_year": 2012,
+  "publication_date": "2012-05-09",
+  "language": "en",
+  "type": "article",
+  "abstract_inverted_index": {
+    "Background": [0],
+    "is": [1],
+    "an": [2],
+    "inverted": [3],
+    "index": [4],
+    "and": [6],
+    "words": [5, 8],
+    "repeat": [7]
+  },
+  "authorships": [
+    {
+      "author": {
+        "id": "https://openalex.org/A5019339847",
+        "display_name": "Ada Lovelace",
+        "orcid": "https://orcid.org/0000-0002-1825-0097"
+      },
+      "institutions": [
+        { "display_name": "Example University" }
+      ],
+      "raw_author_name": "Ada Lovelace",
+      "raw_affiliation_strings": ["Example University"]
+    },
+    {
+      "author": { "id": "", "display_name": "" },
+      "institutions": [],
+      "raw_author_name": "Anonymous Collaborator",
+      "raw_affiliation_strings": ["Somewhere Else"]
+    }
+  ],
+  "primary_location": {
+    "source": {
+      "display_name": "PLOS ONE",
+      "host_organization_name": "PLOS"
+    },
+    "landing_page_url": "https://journals.plos.org/plosone/article?id=10.1371/journal.pone.0033693"
+  },
+  "best_oa_location": {
+    "pdf_url": "https://example.org/open/sample.pdf",
+    "landing_page_url": "https://example.org/open/sample",
+    "license": "cc-by"
+  },
+  "open_access": {
+    "is_oa": true,
+    "oa_status": "gold",
+    "oa_url": "https://example.org/open/sample.pdf"
+  },
+  "biblio": {
+    "volume": "7",
+    "issue": "5",
+    "first_page": "e33693",
+    "last_page": ""
+  },
+  "topics": [
+    { "display_name": "Topic Alpha" },
+    { "display_name": "Topic Beta" }
+  ],
+  "keywords": [
+    { "display_name": "keyword one" },
+    { "display_name": "keyword two" }
+  ],
+  "cited_by_count": 42,
+  "referenced_works_count": 31,
+  "referenced_works": [
+    "https://openalex.org/W111",
+    "https://openalex.org/W222",
+    "https://openalex.org/W333"
+  ],
+  "locations": [
+    { "landing_page_url": "https://arxiv.org/abs/1706.03762" }
+  ]
+}
