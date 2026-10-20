@@ -34,84 +34,59 @@ from __future__ import annotations
 import json
 import os
 import threading
-from typing import Any
+from collections import OrderedDict
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from . import __version__
-from . import citation, extract, format as bib, matrix, pipeline, web_sources
+from . import citation, extract, format as bib, matrix, pipeline, relevance, web_sources
 from .config import Settings, load_settings
 from .download import download_pdf
 from .errors import ConfigurationError, ResearcherError
-from .models import SORT_MODES, TRIAGE_LABELS, Paper
+from .models import SORT_MODES, TRIAGE_LABELS, Paper, sort_papers
 from .prisma import render_prisma_markdown
 from .screening import LabelUpdate, PrescreenCriteria, apply_updates
 from .sources.base import SEARCH_FIELDS, SearchFilters
 from .sources import DEFAULT_SOURCES, source_names
 from .web_sources import web_source_names
-from .workspace import Workspace
+from .workspace import Workspace, WorkspaceSearch
 
 __all__ = ["TOOLS", "build_server", "main", "server"]
 
 _SERVER_NAME = "researcher-python"
 _SERVER_INSTRUCTIONS = (
-    "Unified scholarly search across arXiv, OpenAlex, Semantic Scholar, Crossref "
-    "and PubMed. Use 'search_papers' to find works, 'get_paper' for one "
-    "identifier (DOI / arXiv id / PMID), 'references'/'citations' to walk the "
-    "citation graph, 'download_pdf' for an open-access PDF, 'bibliography' to "
-    "render BibTeX/RIS/CSL-JSON, and 'web_search' for Stack Overflow / Reddit. "
-    "'sources' and 'info' report what is configured.\n"
+    "Unified scholarly search across arXiv, OpenAlex, Semantic Scholar, "
+    "Crossref, PubMed, ACM and OpenAIRE. Tools: search_papers, get_paper, "
+    "references/citations, download_pdf, bibliography, web_search, report, "
+    "screen, prescreen, snowball, sources, info, and the workspace tools.\n"
     "\n"
-    "WORKSPACES: call 'open_workspace' with a directory to make search_papers "
-    "persist automatically. A workspace owns results.json, an append-only "
-    "search log and its meta; a search into an existing workspace dedupes "
-    "against prior rounds and reports counts.new / counts.seen / "
-    "counts.screened. 'workspace_status' shows the round, counts and "
-    "provenance; 'workspace_next_round' snapshots and advances. Without an "
-    "open workspace (or workspace='...' on the call) a search is pure and "
-    "returns persisted=false.\n"
+    "PAGING: search_papers returns a *summary page* by default (limit=10). Read "
+    "summary, kept, has_more and next_offset; pass offset for the next page. "
+    "detail='compact' adds a 240-char abstract excerpt; detail='full' or "
+    "get_paper returns the complete record. fields=[...] projects exact keys. "
+    "max_results caps each source; limit pages the merged set.\n"
     "\n"
-    "SEARCHING: prefer sort='score' plus a floor over raising max_results. Each "
-    "source ranks by a private, mutually incomparable score, so a merged set "
-    "otherwise keeps every source's weakest hits; max_results caps each source "
-    "separately and cannot remove them afterwards. top_ratio (0.0<R<=1.0) keeps "
-    "records scoring at least R x the best and is scale-free, so it cuts the "
-    "tail however long the query; min_score (0.0-1.0) is an absolute floor and "
-    "removes nothing on a long query. Both are optional and combine. The reply "
-    "reports 'dropped' and the 'terms' scored against, and every record carries "
-    "a local 'relevance' value.\n"
+    "SEARCHING: prefer sort='score' plus top_ratio over raising max_results: "
+    "each source ranks by a private, mutually incomparable score. min_score is "
+    "absolute and removes nothing on a long query; top_ratio is scale-free and "
+    "cuts the tail. The reply reports dropped, terms and each record's "
+    "relevance.\n"
     "\n"
-    "SCREENING IS PART OF SEARCHING, NOT AN OPTIONAL EXTRA. The deliverable is "
-    "a Literature Matrix, and a matrix is defined by its triage decisions: rows "
-    "still marked 'unreviewed' are a raw search dump, not a literature review. "
-    "The workflow is search -> prescreen -> screen -> snowball -> matrix -> "
-    "synthesis -> bibliography:\n"
-    "  1. open_workspace, then search_papers (persists) — or search_papers "
-    "with workspace='...'. The workspace is the result set.\n"
-    "  2. 'prescreen' flags obvious exclusions by rule (no abstract, grant/"
-    "standard/dataset, outside a year window). It reports by default; pass "
-    "apply=True only after checking the candidates, because a rule can be "
-    "wrong for grey literature. It never overwrites a human label.\n"
-    "  3. 'screen' (alias 'label') sets the stored label: core | general | "
-    "excluded, plus 'reason' for exclusions and 'note' for dated reading "
-    "notes. Use 'updates': [{id|ids, label, reason, note}, ...] to screen a "
-    "batch in ONE call; unmatched ids and invalid entries are reported. The "
-    "old set_label/ids/note form still works.\n"
-    "  4. 'snowball' expands the records labelled 'core' through references, "
-    "citations or both. It returns only records not already in the workspace, "
-    "ranked by how many core papers link to them (linked_by/link count). "
-    "persist=True (the default) merges them and logs the expansion as a "
-    "provenance row; persist=False previews.\n"
-    "  5. 'matrix' with from_file=that file. Check screening.ready in the "
-    "reply: it is False while any record is unreviewed. Pass "
-    "require_screening=True to have the tool refuse an unscreened set instead "
-    "of emitting one.\n"
-    "  6. 'synthesis' for the dimension x label cross-tab that makes a research "
-    "gap visible, 'prisma' for identification -> deduped -> screened -> "
-    "included counts from the log and labels, and 'bibliography' with "
-    "from_file= so the reference list is reproducible from exactly what was "
-    "screened.\n"
-    "Prefer from_file over a live query for steps 5-6: it renders what was "
-    "actually screened instead of re-running a search whose results may since "
-    "have changed."
+    "WORKSPACES: open_workspace(path) makes search_papers persist (merge, "
+    "append-only log, one search_id). A page after the first reuses that "
+    "result and adds no log row; if it is gone, the page is served read-only "
+    "from the persisted set (page_source says which). workspace_status shows "
+    "counts/round/paths; workspace_next_round snapshots.\n"
+    "\n"
+    "SCREENING IS PART OF THE DELIVERABLE, NOT AN EXTRA. prescreen flags "
+    "obvious exclusions by rule (report-only unless apply=True); screen sets "
+    "core|general|excluded with an optional reason/note, batch via "
+    "updates=[{id|ids,label,reason,note},...]; snowball expands the core set "
+    "through the citation graph. report(kind=...) renders matrix (columns, "
+    "csv|markdown), synthesis (dimension), screening (counts) or prisma "
+    "(workspace only); screen_summary is an alias for screening. Check "
+    "screening.ready or pass require_screening=True before treating a matrix "
+    "as screened. Prefer from_file/workspace over a live query for reports."
 )
 
 #: Bibliography formats accepted by :func:`_bibliography`.
@@ -185,27 +160,44 @@ def _fail(exc: ResearcherError) -> dict[str, Any]:
     }
 
 
-#: Characters of abstract kept by ``compact=True`` (see :func:`_compact_paper`).
+#: Characters of abstract kept by ``detail="compact"``.
 _COMPACT_ABSTRACT = 240
+#: Detail presets for a record in a reply.  ``summary`` is the default: a
+#: 30-record search with full records measured ~107 KB, which is more than the
+#: entire tool catalogue; the summary page measured ~4 KB.
+_DETAIL_LEVELS = ("summary", "compact", "full")
+_DEFAULT_DETAIL = "summary"
+#: Default page size for the merged result (``max_results`` is the per-source
+#: retrieval cap — a different knob).
+_DEFAULT_PAGE = 10
+
+#: Fields ``fields=[...]`` accepts: every top-level ``to_dict()`` key plus the
+#: three derived values a triage list uses.  Derived explicitly from the model
+#: so a new ``Paper`` field becomes projectable without a second list to edit.
+_PAPER_FIELDS = tuple(Paper().to_dict()) + (
+    "key",
+    "author_count",
+    "abstract_excerpt",
+)
 
 
-def _compact_paper(paper: Paper) -> dict[str, Any]:
-    """A triage-sized projection of a record.
-
-    The full ``to_dict()`` carries every field, including a complete abstract
-    for each of up to dozens of records.  That is the right shape for a saved
-    result file and the wrong shape for an agent's context window — in practice
-    a 30-record search overflowed it twice.  This keeps exactly what triage
-    needs (identity, standing, relevance, a readable excerpt) and drops the
-    long tail, which ``get_paper`` still returns in full for any one record.
-    """
+def _excerpt(paper: Paper) -> str:
     abstract = " ".join((paper.abstract or "").split())
-    excerpt = (
+    return (
         abstract
         if len(abstract) <= _COMPACT_ABSTRACT
         else abstract[: _COMPACT_ABSTRACT - 1].rstrip() + "…"
     )
+
+
+def _summary_paper(paper: Paper) -> dict[str, Any]:
+    """The default triage projection: no abstract, no long tail.
+
+    Identity, standing, relevance and the reader's own label — exactly what a
+    scan needs.  ``get_paper`` still returns the complete record for one paper.
+    """
     return {
+        "key": paper.primary_id() or " ".join((paper.title or "").split())[:80],
         "doi": paper.doi,
         "arxiv_id": paper.arxiv_id,
         "pmid": paper.pmid,
@@ -213,27 +205,96 @@ def _compact_paper(paper: Paper) -> dict[str, Any]:
         "year": paper.year,
         "venue": paper.venue,
         "work_type": paper.work_type,
-        "authors": [a.name for a in paper.authors[:4]],
+        "authors": [a.name for a in paper.authors[:3]],
         "author_count": len(paper.authors),
         "citation_count": paper.citation_count,
         "is_open_access": paper.is_open_access,
         "relevance": paper.relevance,
         "label": paper.triage_label(),
-        "abstract_excerpt": excerpt,
     }
 
 
-def _search_payload(
-    result: pipeline.PipelineResult, query: str, compact: bool = False
+def _compact_paper(paper: Paper) -> dict[str, Any]:
+    """Summary plus a readable abstract excerpt (older opt-in shape)."""
+    return {**_summary_paper(paper), "abstract_excerpt": _excerpt(paper)}
+
+
+def _project_paper(paper: Paper, fields: list[str]) -> dict[str, Any]:
+    """Exact top-level projection; ``fields`` wins over ``detail``."""
+    data = paper.to_dict()
+    projected: dict[str, Any] = {}
+    for name in fields:
+        if name == "key":
+            projected[name] = _summary_paper(paper)["key"]
+        elif name == "author_count":
+            projected[name] = len(paper.authors)
+        elif name == "abstract_excerpt":
+            projected[name] = _excerpt(paper)
+        else:
+            projected[name] = data.get(name)
+    return projected
+
+
+def _shape_paper(
+    paper: Paper, detail: str = _DEFAULT_DETAIL, fields: list[str] | None = None
 ) -> dict[str, Any]:
-    papers = [
-        _compact_paper(p) if compact else p.to_dict() for p in result.papers
-    ]
+    if fields:
+        return _project_paper(paper, fields)
+    if detail == "full":
+        return paper.to_dict()
+    if detail == "compact":
+        return _compact_paper(paper)
+    return _summary_paper(paper)
+
+
+def _search_summary(kept: int, shown: int, offset: int, failed: int) -> str:
+    """The human sentence an agent can quote: "143 kept, 3 sources errored, top 10 shown"."""
+    parts = [f"{kept} kept"]
+    if failed:
+        parts.append(f"{failed} source{'s' if failed != 1 else ''} errored")
+    if not shown:
+        parts.append("no records shown")
+    elif offset:
+        parts.append(f"rows {offset + 1}-{offset + shown} shown")
+    else:
+        parts.append(f"top {shown} shown")
+    return ", ".join(parts)
+
+
+def _search_payload(
+    result: pipeline.PipelineResult,
+    query: str,
+    *,
+    detail: str = _DEFAULT_DETAIL,
+    fields: list[str] | None = None,
+    offset: int = 0,
+    limit: int | None = _DEFAULT_PAGE,
+) -> dict[str, Any]:
+    """Shape one page of a merged result.
+
+    Paging is **presentation-only**: callers must slice here, after the
+    workspace has merged the complete result, or a paged search would persist
+    just its first page.
+    """
+    kept = len(result.papers)
+    page = (
+        result.papers[offset:]
+        if limit is None
+        else result.papers[offset : offset + limit]
+    )
+    papers = [_shape_paper(p, detail, fields) for p in page]
     attempted = list(result.by_source)
     failed = [name for name in attempted if name in result.errors]
+    has_more = offset + len(papers) < kept
     return _ok(
         query=query,
+        summary=_search_summary(kept, len(papers), offset, len(failed)),
+        kept=kept,
         count=len(papers),
+        offset=offset,
+        limit=limit,
+        has_more=has_more,
+        next_offset=(offset + len(papers)) if has_more else None,
         papers=papers,
         by_source=dict(result.by_source),
         errors={name: _fail(err)["message"] for name, err in result.errors.items()},
@@ -247,6 +308,40 @@ def _search_payload(
         terms=list(result.terms),
         dropped=result.dropped,
     )
+
+
+def _validate_view(
+    detail: str, fields: list[str] | None, limit: int | None, offset: int
+) -> tuple[str, list[str] | None, int | None, int]:
+    """Validate the presentation knobs before any network call."""
+    if detail not in _DETAIL_LEVELS:
+        raise ConfigurationError(
+            f"unknown detail {detail!r}; expected one of {', '.join(_DETAIL_LEVELS)}"
+        )
+    if fields is not None:
+        if not fields:
+            raise ConfigurationError(
+                "fields is empty; omit it for a detail preset or name at least one field"
+            )
+        unknown = [name for name in fields if name not in _PAPER_FIELDS]
+        if unknown:
+            raise ConfigurationError(
+                f"unknown field(s) {', '.join(unknown)}; available: "
+                f"{', '.join(_PAPER_FIELDS)}"
+            )
+        # Deduplicate while keeping the caller's order.
+        fields = list(dict.fromkeys(fields))
+    if limit is not None and (
+        isinstance(limit, bool) or not isinstance(limit, int) or limit < 1
+    ):
+        raise ConfigurationError(
+            f"limit must be a positive integer or null, got {limit!r}"
+        )
+    if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
+        raise ConfigurationError(
+            f"offset must be a non-negative integer, got {offset!r}"
+        )
+    return detail, fields, limit, offset
 
 
 def _citation_payload(result: citation.CitationResult) -> dict[str, Any]:
@@ -317,6 +412,8 @@ def _tool_open_workspace(
             path, settings=_settings(), create=create, round=round
         )
         _set_workspace(workspace)
+        # A reopened path must not serve a page cached from the previous session.
+        _clear_page_cache()
         return _ok(workspace=workspace.status())
     except ResearcherError as exc:
         return _fail(exc)
@@ -342,6 +439,7 @@ def _tool_workspace_status(workspace: str | None = None) -> dict[str, Any]:
 def _tool_close_workspace() -> dict[str, Any]:
     previous = _WORKSPACE
     _set_workspace(None)
+    _clear_page_cache()
     return _ok(closed=str(previous.path) if previous is not None else None)
 
 
@@ -402,6 +500,103 @@ def _tool_info() -> dict[str, Any]:
     )
 
 
+@dataclass(slots=True)
+class _CachedSearch:
+    """The full result of the last search, kept only to serve later pages."""
+
+    result: pipeline.PipelineResult
+    outcome: WorkspaceSearch | None = None
+
+
+#: The last few full results, keyed by (workspace path or "__pure__", params).
+#: Paging must never append a second log row or mint a second search id, so a
+#: page call reuses the result the first call already produced.
+_PAGE_CACHE_MAX = 8
+_PAGE_CACHE: OrderedDict[tuple[str, tuple[Any, ...]], _CachedSearch] = OrderedDict()
+_PAGE_CACHE_LOCK = threading.Lock()
+
+
+def _cache_namespace(path: Any) -> str:
+    return "__pure__" if path is None else str(path)
+
+
+def _page_cache_get(
+    namespace: str, signature: tuple[Any, ...]
+) -> _CachedSearch | None:
+    with _PAGE_CACHE_LOCK:
+        key = (namespace, signature)
+        entry = _PAGE_CACHE.get(key)
+        if entry is not None:
+            _PAGE_CACHE.move_to_end(key)
+        return entry
+
+
+def _page_cache_put(
+    namespace: str, signature: tuple[Any, ...], entry: _CachedSearch
+) -> None:
+    with _PAGE_CACHE_LOCK:
+        key = (namespace, signature)
+        _PAGE_CACHE[key] = entry
+        _PAGE_CACHE.move_to_end(key)
+        while len(_PAGE_CACHE) > _PAGE_CACHE_MAX:
+            _PAGE_CACHE.popitem(last=False)
+
+
+def _clear_page_cache() -> None:
+    with _PAGE_CACHE_LOCK:
+        _PAGE_CACHE.clear()
+
+
+def _search_signature(
+    query: str,
+    *,
+    sources: list[str] | str | None,
+    max_results: int,
+    sort: str,
+    filters: SearchFilters,
+    min_score: float | None,
+    top_ratio: float | None,
+    min_citations: int | None,
+    enrich: bool | None,
+    round_number: int | None,
+) -> tuple[Any, ...]:
+    """Every input that changes the result — a page must match its first call."""
+    if isinstance(sources, str):
+        source_key: tuple[str, ...] | None = (sources,)
+    else:
+        source_key = tuple(sources) if sources else None
+    return (
+        query,
+        source_key,
+        max_results,
+        sort,
+        filters.year_from,
+        filters.year_to,
+        filters.field,
+        tuple(filters.types or ()),
+        tuple(filters.exclude_types or ()),
+        min_score,
+        top_ratio,
+        min_citations,
+        enrich,
+        round_number,
+    )
+
+
+def _persisted_page_result(
+    target: Workspace, query: str, sort: str
+) -> pipeline.PipelineResult:
+    """A page of the canonical set, for when the original result is gone.
+
+    Used only on a page request the in-process cache cannot serve (a restart or
+    a changed search).  It never writes: the workspace already owns the set and
+    its log row, so paging stays read-only.
+    """
+    terms = relevance.query_terms(query)
+    papers = sort_papers(list(target.papers), sort, query=query or None)
+    return pipeline.PipelineResult(papers=papers, terms=terms)
+
+
 def _tool_search(
     query: str,
     sources: list[str] | None = None,
@@ -412,21 +607,37 @@ def _tool_search(
     field: str = "any",
     min_score: float | None = None,
     top_ratio: float | None = None,
-    compact: bool = False,
     min_citations: int | None = None,
     workspace: str | None = None,
     types: list[str] | None = None,
     exclude_types: list[str] | None = None,
     default_excludes: bool = True,
     enrich: bool | None = None,
+    detail: str = _DEFAULT_DETAIL,
+    fields: list[str] | None = None,
+    limit: int | None = _DEFAULT_PAGE,
+    offset: int = 0,
 ) -> dict[str, Any]:
-    """Search with an optional publication window, field scope and floors.
+    """Search, summarize and page; persist once when a workspace is open.
 
-    When a workspace is open (or ``workspace`` names one), the search is
-    persisted through it: records merge into the canonical set and the reply
-    reports ``new`` / ``seen`` / ``screened`` as well as the request params.
-    Without a workspace the call stays pure and returns ``persisted: false``.
+    ``max_results`` is the per-source retrieval cap.  ``limit``/``offset`` page
+    the *merged* set (default 10 rows).  A page after the first is served from
+    the in-process result of the first call, so it appends no search-log row and
+    mints no second ``search_id``; if that result is gone, a workspace page is
+    served read-only from the persisted set (``page_source="workspace_set"``).
     """
+    try:
+        detail, fields, limit, offset = _validate_view(
+            detail, fields, limit, offset
+        )
+    except ResearcherError as exc:
+        return _fail(exc)
+    if sort not in SORT_MODES:
+        return _fail(
+            ConfigurationError(
+                f"unknown sort {sort!r}; expected one of {', '.join(SORT_MODES)}"
+            )
+        )
     try:
         from .work_types import DEFAULT_SEARCH_EXCLUDE_TYPES, resolve_types
 
@@ -451,10 +662,36 @@ def _tool_search(
             "message": str(exc),
         }
 
-    outcome = None
+    outcome: WorkspaceSearch | None = None
+    target: Workspace | None = None
+    page_source = "search"
     try:
         target = _resolve_workspace(workspace)
-        if target is not None:
+        namespace = _cache_namespace(target.path if target is not None else None)
+        round_number = target.round if target is not None else None
+        signature = _search_signature(
+            query,
+            sources=sources,
+            max_results=max_results,
+            sort=sort,
+            filters=filters,
+            min_score=min_score,
+            top_ratio=top_ratio,
+            min_citations=min_citations,
+            enrich=enrich,
+            round_number=round_number,
+        )
+        cached = _page_cache_get(namespace, signature) if offset > 0 else None
+        if cached is not None:
+            outcome = cached.outcome
+            result = cached.result
+            page_source = "cached_search"
+        elif offset > 0 and target is not None:
+            # The original result is gone (restart / changed search).  Serve the
+            # page read-only from the canonical set rather than searching twice.
+            result = _persisted_page_result(target, query, sort)
+            page_source = "workspace_set"
+        elif target is not None:
             outcome = target.search(
                 query,
                 sources=sources,
@@ -469,6 +706,9 @@ def _tool_search(
                 settings=_settings(),
             )
             result = outcome.result
+            _page_cache_put(
+                namespace, signature, _CachedSearch(result, outcome)
+            )
         else:
             result = pipeline.search(
                 query,
@@ -482,10 +722,14 @@ def _tool_search(
                 min_citations=min_citations,
                 enrich=enrich,
             )
+            _page_cache_put(namespace, signature, _CachedSearch(result))
     except ResearcherError as exc:
         return _fail(exc)
 
-    payload = _search_payload(result, query, compact)
+    payload = _search_payload(
+        result, query, detail=detail, fields=fields, offset=offset, limit=limit
+    )
+    payload["page_source"] = page_source
     payload["filters"] = {
         "year_from": year_from,
         "year_to": year_to,
@@ -512,8 +756,6 @@ def _tool_search(
             "path": outcome.paths["workspace"],
             "round": outcome.round,
             "search_id": outcome.search_id,
-            "results": outcome.paths["results"],
-            "log": outcome.paths["log"],
         }
         payload["counts"] = {
             "returned": len(result.papers),
@@ -527,13 +769,26 @@ def _tool_search(
             "round": outcome.round,
             "search_id": outcome.search_id,
             "params": outcome.params,
-            "by_source": dict(result.by_source),
-            "errors": {
-                name: _fail(error)["message"]
-                for name, error in result.errors.items()
-            },
-            "terms": list(result.terms),
         }
+    elif target is not None:
+        last = target.meta.get("last_search") or {}
+        payload["persisted"] = True
+        payload["workspace"] = {
+            "path": str(target.path),
+            "round": last.get("round", target.round),
+            "search_id": last.get("id"),
+        }
+        payload["counts"] = {
+            "returned": len(result.papers),
+            "total": len(result.papers),
+        }
+        payload["meta"] = {
+            "round": last.get("round", target.round),
+            "search_id": last.get("id"),
+        }
+        payload["hint"] = (
+            "page served from the persisted workspace set; no new search or log row"
+        )
     else:
         payload["persisted"] = False
         payload["hint"] = payload.get("hint") or (
@@ -650,6 +905,145 @@ def _tool_screen_summary(
         # `ready`/`message` answer "can this be submitted as a screened set?".
         screening=matrix.screening_report(papers),
     )
+
+
+#: Matrix render formats (matrices are tables, not reference lists).
+_MATRIX_FORMATS = ("csv", "markdown")
+
+#: Kinds of artefact ``report`` renders.  ``screen_summary`` is the old tool
+#: name, kept as an accepted alias so a memorised call still works.
+REPORT_KINDS = ("matrix", "synthesis", "screening", "prisma")
+_REPORT_ALIASES = {"screen_summary": "screening"}
+_REPORT_FORMATS: dict[str, tuple[str, ...]] = {
+    "matrix": _MATRIX_FORMATS,
+    "synthesis": _MATRIX_FORMATS,
+    "screening": (),
+    "prisma": ("json", "markdown"),
+}
+_REPORT_DEFAULT_FORMAT = {"matrix": "csv", "synthesis": "csv", "prisma": "json"}
+
+
+def _tool_report(
+    kind: str,
+    identifiers: list[str] | None = None,
+    query: str | None = None,
+    from_file: str | None = None,
+    sources: list[str] | None = None,
+    max_results: int = 25,
+    columns: list[str] | None = None,
+    dimension: str = "year",
+    format: str | None = None,
+    require_screening: bool = False,
+    workspace: str | None = None,
+) -> dict[str, Any]:
+    """Dispatch one of the report artefacts (matrix, synthesis, counts, PRISMA).
+
+    One tool instead of four: the input model is shared, and a single enum is
+    cheaper in the tool schema than four near-identical signatures.  Each kind
+    delegates to the function that already implements it, so this is a router,
+    not a second implementation.
+    """
+    resolved = _REPORT_ALIASES.get(kind, kind)
+    if resolved not in REPORT_KINDS:
+        return _fail(
+            ConfigurationError(
+                f"unknown report kind {kind!r}; expected one of "
+                f"{', '.join(REPORT_KINDS)}"
+            )
+        )
+
+    if resolved == "prisma":
+        if identifiers or query or from_file:
+            return _fail(
+                ConfigurationError(
+                    "kind='prisma' reads the workspace; do not pass "
+                    "identifiers/query/from_file"
+                )
+            )
+        if columns is not None:
+            return _fail(
+                ConfigurationError("columns applies only to kind='matrix'")
+            )
+        if dimension != "year":
+            return _fail(
+                ConfigurationError(
+                    "dimension applies only to kind='synthesis'"
+                )
+            )
+        if require_screening:
+            return _fail(
+                ConfigurationError(
+                    "require_screening applies only to matrix/synthesis"
+                )
+            )
+        chosen = _REPORT_DEFAULT_FORMAT["prisma"] if format is None else format
+        if chosen not in _REPORT_FORMATS["prisma"]:
+            return _fail(
+                ConfigurationError(
+                    f"unknown prisma format {chosen!r}; expected one of "
+                    f"{', '.join(_REPORT_FORMATS['prisma'])}"
+                )
+            )
+        payload = _tool_prisma(workspace=workspace, format=chosen)
+        return {**payload, "kind": resolved}
+
+    if columns is not None and resolved != "matrix":
+        return _fail(ConfigurationError("columns applies only to kind='matrix'"))
+    if dimension != "year" and resolved != "synthesis":
+        return _fail(
+            ConfigurationError("dimension applies only to kind='synthesis'")
+        )
+
+    if resolved == "screening":
+        if format is not None:
+            return _fail(
+                ConfigurationError("kind='screening' takes no format")
+            )
+        # The screening report is counts + readiness; there is no render gate.
+        if require_screening:
+            return _fail(
+                ConfigurationError(
+                    "require_screening applies only to matrix/synthesis"
+                )
+            )
+        payload = _tool_screen_summary(
+            identifiers, query, from_file, sources, max_results, workspace
+        )
+        return {**payload, "kind": resolved}
+
+    chosen = _REPORT_DEFAULT_FORMAT[resolved] if format is None else format
+    if chosen not in _REPORT_FORMATS[resolved]:
+        return _fail(
+            ConfigurationError(
+                f"unknown {resolved} format {chosen!r}; expected one of "
+                f"{', '.join(_REPORT_FORMATS[resolved])}"
+            )
+        )
+    if resolved == "matrix":
+        payload = _tool_matrix(
+            identifiers,
+            query,
+            from_file,
+            sources,
+            max_results,
+            columns,
+            chosen,
+            require_screening,
+            workspace,
+        )
+    else:
+        payload = _tool_synthesis(
+            identifiers,
+            query,
+            from_file,
+            sources,
+            max_results,
+            dimension,
+            chosen,
+            require_screening,
+            workspace,
+        )
+    return {**payload, "kind": resolved}
 
 
 def _tool_label(
@@ -1126,10 +1520,6 @@ def _fail_bad_format(format: str) -> dict[str, Any]:
     }
 
 
-#: Matrix render formats (matrices are tables, not reference lists).
-_MATRIX_FORMATS = ("csv", "markdown")
-
-
 def _fail_bad_matrix_format(format: str) -> dict[str, Any]:
     return {
         "ok": False,
@@ -1186,14 +1576,10 @@ TOOLS = (
     "download_pdf",
     "bibliography",
     "web_search",
-    "matrix",
-    "synthesis",
-    "screen_summary",
-    "label",
+    "report",
     "screen",
     "prescreen",
     "snowball",
-    "prisma",
     "extract_text",
     "find_quotes",
 )
@@ -1281,64 +1667,48 @@ def build_server(settings: Settings | None = None):
         field: str = "any",
         min_score: float | None = None,
         top_ratio: float | None = None,
-        compact: bool = False,
         min_citations: int | None = None,
         workspace: str | None = None,
         types: list[str] | None = None,
         exclude_types: list[str] | None = None,
         default_excludes: bool = True,
         enrich: bool | None = None,
+        detail: Literal["summary", "compact", "full"] = "summary",
+        fields: list[str] | None = None,
+        limit: int | None = 10,
+        offset: int = 0,
     ) -> dict:
-        """Search papers across sources and return merged, deduped records.
+        """Search papers across sources; merged, deduped, summarized and paged.
 
-        ``sources`` defaults to all scholarly sources.  ``sort`` is one of
-        relevance, score, year, citations, title.  ``year_from``/``year_to`` bound
-        the publication window and ``field`` narrows matching to ``title`` or
-        ``abstract`` — stated once, applied by every source, so the search is
-        repeatable.  A per-source failure is reported in ``errors`` and never
-        aborts the call.
-
-        **Prefer ``sort="score"`` plus a floor over raising ``max_results`` when
-        the aim is relevance.**  Each source ranks by a private, mutually
-        incomparable score, so a merged set otherwise keeps whatever every
-        source's weakest hits were; ``max_results`` caps each source separately
-        and cannot remove them afterwards.
-
-        Two floors, applied to the merged set, with ``dropped`` in the reply
-        saying how many records each removed:
-
-        * ``min_score`` (0.0–1.0) — absolute.  Does not scale with query
-          length: on a long query almost any on-subject paper clears a low bar.
-        * ``top_ratio`` (0.0<R<=1.0) — keep records scoring at least
-          ``R x the best score``.  Scale-free, so it cuts the tail whatever the
-          query length.  Usually the better lever.
-
-        Every record also carries a ``relevance`` field: the local score used.
-        An empty result set explains itself in ``hint`` (e.g. a field-scoped
-        AND match that is too long to match anything).
-
-        ``types`` is an allow-list of canonical work types (``article``,
-        ``review``, ``preprint``, ``book``, ``dataset``, ``grant``, ...);
-        source spellings such as ``journal-article`` are accepted.  By default
-        searches exclude ``grant`` and ``standard``; an explicit ``types`` list
-        replaces that default, and ``exclude_types`` adds to it.  Set
-        ``default_excludes=False`` to start with no exclusions.  A record with
-        an unknown type is kept.
-
-        ``min_citations`` drops records below a raw citation count.  An
-        **unknown** count is kept (never hide grey literature), and raw counts
-        reward age — the matrix's ``citations_per_year`` column is the
-        age-normalised view and the better triage signal.
-
-        ``compact=True`` returns a triage-sized projection — identity, standing,
-        relevance and a 240-character abstract excerpt — instead of the full
-        record.  Use it when scanning many results; use ``get_paper`` for the
-        complete record of one.
+        ``max_results`` caps each source's retrieval. ``limit``/``offset`` page
+        the merged set (default 10 rows); the reply reports ``summary``,
+        ``kept``, ``has_more`` and ``next_offset``. ``detail`` is ``summary``
+        (default, no abstract), ``compact`` (240-char excerpt) or ``full``;
+        ``fields`` projects exact keys and wins over it. ``sort='score'`` plus
+        ``top_ratio`` beats a large ``max_results`` because source scores are
+        incomparable. ``errors`` reports per-source failures without aborting
+        the call. Use ``get_paper`` for one complete record.
         """
         return _tool_search(
-            query, sources, max_results, sort, year_from, year_to, field,
-            min_score, top_ratio, compact, min_citations, workspace,
-            types, exclude_types, default_excludes, enrich,
+            query,
+            sources=sources,
+            max_results=max_results,
+            sort=sort,
+            year_from=year_from,
+            year_to=year_to,
+            field=field,
+            min_score=min_score,
+            top_ratio=top_ratio,
+            min_citations=min_citations,
+            workspace=workspace,
+            types=types,
+            exclude_types=exclude_types,
+            default_excludes=default_excludes,
+            enrich=enrich,
+            detail=detail,
+            fields=fields,
+            limit=limit,
+            offset=offset,
         )
 
     @server.tool()
@@ -1412,99 +1782,45 @@ def build_server(settings: Settings | None = None):
             query, source, max_results, sort, subreddit, time_range, site
         )
 
-    # --- screening and matrices ---------------------------------------
+    # --- screening and reports ----------------------------------------
     @server.tool()
-    def matrix(
+    def report(
+        kind: Literal[
+            "matrix", "synthesis", "screening", "prisma", "screen_summary"
+        ],
         identifiers: list[str] | None = None,
         query: str | None = None,
         from_file: str | None = None,
         sources: list[str] | None = None,
         max_results: int = 25,
         columns: list[str] | None = None,
-        format: str = "csv",
-        require_screening: bool = False,
-        workspace: str | None = None,
-    ) -> dict:
-        """Literature Matrix: one row per paper, as CSV or Markdown.
-
-        Reads the reader-owned triage state (``label``, ``notes``) carried on
-        each record, so the matrix reflects screening rather than raw search
-        output.  Pass ``columns`` to choose fields (``score`` records the local
-        relevance that admitted each row).  The reply's ``screening.ready`` is
-        ``False`` while any record is still ``unreviewed``.
-        """
-        return _tool_matrix(
-            identifiers, query, from_file, sources, max_results, columns, format,
-            require_screening, workspace,
-        )
-
-    @server.tool()
-    def synthesis(
-        identifiers: list[str] | None = None,
-        query: str | None = None,
-        from_file: str | None = None,
-        sources: list[str] | None = None,
-        max_results: int = 25,
         dimension: str = "year",
-        format: str = "csv",
+        format: str | None = None,
         require_screening: bool = False,
         workspace: str | None = None,
     ) -> dict:
-        """Synthesis Matrix: a dimension cross-tabbed against screening labels.
+        """Render one report artefact from a saved set or workspace.
 
-        ``dimension`` is label, year, type, venue or open_access.  Also returns
-        the screening summary, so a research-gap argument has its counts.
+        ``kind='matrix'`` (``columns``, csv|markdown), ``'synthesis'``
+        (``dimension``, csv|markdown), ``'screening'`` (counts per label) or
+        ``'prisma'`` (workspace only, json|markdown). Inputs: identifiers,
+        query, from_file or workspace. Check ``screening.ready`` before
+        treating a matrix as screened; pass ``require_screening=True`` to
+        refuse an unscreened set. ``screen_summary`` is an alias for
+        ``screening``.
         """
-        return _tool_synthesis(
-            identifiers, query, from_file, sources, max_results, dimension, format,
-            require_screening, workspace,
-        )
-
-    @server.tool()
-    def screen_summary(
-        identifiers: list[str] | None = None,
-        query: str | None = None,
-        from_file: str | None = None,
-        sources: list[str] | None = None,
-        max_results: int = 25,
-        workspace: str | None = None,
-    ) -> dict:
-        """Screening counts per triage label (unreviewed/core/general/excluded)."""
-        return _tool_screen_summary(
-            identifiers, query, from_file, sources, max_results, workspace
-        )
-
-    @server.tool()
-    def label(
-        from_file: str | None = None,
-        set_label: str | None = None,
-        ids: list[str] | None = None,
-        reason: str = "",
-        note: str = "",
-        out_file: str | None = None,
-        workspace: str | None = None,
-        updates: list[dict[str, Any]] | None = None,
-        strict: bool = True,
-    ) -> dict:
-        """Set screening labels / append notes (``label`` is the stored field).
-
-        Screening is written back to the JSON (or the workspace's canonical
-        ``results.json``) so later matrix, synthesis and bibliography renders
-        see it.  Prefer the ``screen`` alias for the action.  Use
-        ``updates=[{id|ids, label, reason, note}, ...]`` to apply a batch in
-        one call; unmatched ids and invalid entries are reported.  Omitting
-        ``ids`` (and ``updates``) applies the single label to every record.
-        """
-        return _tool_label(
+        return _tool_report(
+            kind,
+            identifiers=identifiers,
+            query=query,
             from_file=from_file,
-            set_label=set_label,
-            ids=ids,
-            reason=reason,
-            note=note,
-            out_file=out_file,
+            sources=sources,
+            max_results=max_results,
+            columns=columns,
+            dimension=dimension,
+            format=format,
+            require_screening=require_screening,
             workspace=workspace,
-            updates=updates,
-            strict=strict,
         )
 
     @server.tool()
@@ -1521,10 +1837,10 @@ def build_server(settings: Settings | None = None):
     ) -> dict:
         """Screen records: set the stored label / notes, one or many.
 
-        The verb form of ``label``.  Batch shape:
+        ``label`` is the stored field; ``screen`` is the action. Batch shape:
         ``updates=[{"id": "10.1/a", "label": "core"},
         {"ids": ["10.1/b", "10.1/c"], "label": "excluded",
-        "reason": "off topic"}]``.  A batch is validated up front and written
+        "reason": "off topic"}]``. A batch is validated up front and written
         once; ``strict=False`` applies the valid entries and reports the rest.
         """
         return _tool_screen(
@@ -1607,18 +1923,6 @@ def build_server(settings: Settings | None = None):
             max_results=max_results,
             persist=persist,
         )
-
-    @server.tool()
-    def prisma(workspace: str | None = None, format: str = "json") -> dict:
-        """PRISMA-style counts: identified -> deduped -> screened -> included.
-
-        Derived from the workspace's append-only log (identification and
-        per-source counts) and the reader's labels.  ``format="markdown"``
-        returns a paste-ready appendix table.  Gaps are reported in
-        ``warnings`` rather than smoothed over: an imported workspace with no
-        log has no honest identification count.
-        """
-        return _tool_prisma(workspace=workspace, format=format)
 
     # --- PDF text ------------------------------------------------------
     @server.tool()

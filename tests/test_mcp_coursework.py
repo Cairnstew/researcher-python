@@ -34,11 +34,21 @@ def results_file(tmp_path):
 
 
 class TestToolRegistration:
-    def test_the_new_tools_are_declared(self) -> None:
-        for name in ("matrix", "synthesis", "screen_summary", "label", "screen",
-                     "prescreen", "snowball", "prisma",
+    def test_the_current_tools_are_declared(self) -> None:
+        for name in ("report", "screen", "prescreen", "snowball",
                      "extract_text", "find_quotes"):
             assert name in mcp_mod.TOOLS
+
+    def test_the_folded_tools_are_no_longer_registered(self) -> None:
+        # report() replaces three tools, prisma folded in, and label was a
+        # byte-for-byte duplicate of screen.
+        for old in ("matrix", "synthesis", "screen_summary", "label", "prisma"):
+            assert old not in mcp_mod.TOOLS
+
+    def test_report_kinds_are_declared(self) -> None:
+        assert mcp_mod.REPORT_KINDS == (
+            "matrix", "synthesis", "screening", "prisma"
+        )
 
     def test_bibliography_defaults_to_harvard(self) -> None:
         assert mcp_mod._BIB_FORMATS[0] == "harvard"
@@ -178,6 +188,68 @@ class TestMatrixTools:
         payload = mcp_mod._tool_screen_summary(from_file=results_file)
         assert payload["summary"]["total"] == 2
         assert payload["labels"][0] == "unreviewed"
+
+
+class TestReportTool:
+    def test_matrix_kind_renders_csv(self, results_file) -> None:
+        payload = mcp_mod._tool_report("matrix", from_file=results_file)
+        assert payload["ok"] is True
+        assert payload["kind"] == "matrix"
+        assert payload["count"] == 2
+        assert payload["text"].splitlines()[0].startswith("key,label")
+
+    def test_synthesis_kind_defaults_to_csv(self, results_file) -> None:
+        payload = mcp_mod._tool_report("synthesis", from_file=results_file)
+        assert payload["kind"] == "synthesis"
+        assert "total" in payload["text"].splitlines()[0]
+        assert payload["summary"]["total"] == 2
+
+    def test_screening_kind_accepts_the_old_name_as_an_alias(
+        self, results_file
+    ) -> None:
+        for kind in ("screening", "screen_summary"):
+            payload = mcp_mod._tool_report(kind, from_file=results_file)
+            assert payload["ok"] is True
+            assert payload["kind"] == "screening"
+            assert payload["summary"]["total"] == 2
+
+    def test_prisma_kind_reads_the_workspace(self, tmp_path) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        ws.record_search(
+            SearchParams(query="seed", sources=("openalex",), round=1),
+            PipelineResult(
+                papers=[_paper("10.1/a", 2020, "A")], by_source={"openalex": 1}
+            ),
+        )
+        ws.label(ids=["10.1/a"], set_label="core")
+        payload = mcp_mod._tool_report(
+            "prisma", workspace=str(ws.path), format="markdown"
+        )
+        assert payload["kind"] == "prisma"
+        assert "PRISMA-style" in payload["text"]
+        assert payload["report"]["included"] == 1
+
+    def test_unknown_kind_is_actionable(self) -> None:
+        payload = mcp_mod._tool_report("nope")
+        assert payload["ok"] is False
+        assert payload["error"] == "ConfigurationError"
+        assert "matrix" in payload["message"]
+
+    def test_kind_specific_arguments_are_rejected(self, results_file) -> None:
+        cases = (
+            {"kind": "matrix", "format": "json"},
+            {"kind": "matrix", "dimension": "label"},
+            {"kind": "synthesis", "columns": ["key"]},
+            {"kind": "screening", "format": "csv"},
+            {"kind": "prisma", "query": "x"},
+            {"kind": "prisma", "require_screening": True},
+        )
+        for case in cases:
+            payload = mcp_mod._tool_report(
+                from_file=results_file, **case
+            )
+            assert payload["ok"] is False, case
+            assert payload["error"] == "ConfigurationError", case
 
 
 class TestLabelTool:
@@ -402,20 +474,26 @@ class TestCompactSearchPayload:
 
     def test_compact_returns_a_triage_projection(self, monkeypatch) -> None:
         self._stub(monkeypatch)
-        payload = mcp_mod._tool_search("x", sources=["openalex"], compact=True)
+        payload = mcp_mod._tool_search(
+            "x", sources=["openalex"], detail="compact"
+        )
         assert payload["ok"] is True
         keys = set(payload["papers"][0])
         assert "abstract_excerpt" in keys
         assert "abstract" not in keys
         assert "relevance" in keys
-        assert len(payload["papers"][0]["authors"]) <= 4
+        assert len(payload["papers"][0]["authors"]) <= 3
         assert payload["papers"][0]["author_count"] == 6
 
-    def test_compact_is_materially_smaller(self, monkeypatch) -> None:
+    def test_summary_is_materially_smaller_than_full(self, monkeypatch) -> None:
         self._stub(monkeypatch)
-        full = mcp_mod._tool_search("x", sources=["openalex"])
-        comp = mcp_mod._tool_search("x", sources=["openalex"], compact=True)
-        assert len(json.dumps(comp)) < len(json.dumps(full)) * 0.5
+        full = mcp_mod._tool_search(
+            "x", sources=["openalex"], detail="full", limit=None
+        )
+        summary = mcp_mod._tool_search(
+            "x", sources=["openalex"], detail="summary", limit=None
+        )
+        assert len(json.dumps(summary)) < len(json.dumps(full)) * 0.2
 
     def test_excerpt_is_truncated_not_dropped(self) -> None:
         from researcher_python.mcp_server import _compact_paper
@@ -425,9 +503,19 @@ class TestCompactSearchPayload:
         assert out["abstract_excerpt"].endswith("\u2026")
         assert len(out["abstract_excerpt"]) <= 240
 
-    def test_full_payload_is_still_the_default(self, monkeypatch) -> None:
+    def test_summary_is_the_default(self, monkeypatch) -> None:
         self._stub(monkeypatch, n=1)
         payload = mcp_mod._tool_search("x", sources=["openalex"])
+        assert "abstract" not in payload["papers"][0]
+        assert "abstract_excerpt" not in payload["papers"][0]
+        assert payload["summary"] == "1 kept, top 1 shown"
+        assert payload["kept"] == 1
+
+    def test_detail_full_returns_the_complete_record(self, monkeypatch) -> None:
+        self._stub(monkeypatch, n=1)
+        payload = mcp_mod._tool_search(
+            "x", sources=["openalex"], detail="full"
+        )
         assert "abstract" in payload["papers"][0]
 
     def test_hint_is_surfaced_when_the_set_is_empty(self, monkeypatch) -> None:

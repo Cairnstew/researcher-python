@@ -55,7 +55,7 @@ Use it when an identifier is available:
 | `researcher_citations` | works citing this paper → how the field **actually built on** it (2.b trends, 2.c developments) |
 | `researcher_references` | works this paper cites → its intellectual lineage and the baselines it chose (2.a issues) |
 | `researcher_bibliography` | a citable BibTeX/RIS/CSL-JSON entry for the Source notes line |
-| `researcher_matrix` / `researcher_synthesis` | screen a found set and cross-tab it — the Literature/Synthesis Matrix artefacts |
+| `researcher_report` | `kind="matrix"` / `"synthesis"` — screen a found set and cross-tab it; also `"screening"` and `"prisma"` |
 | `researcher_open_workspace` / `researcher_workspace_status` | persist searches and read back counts/round/provenance |
 
 When you search to corroborate Section 2, pass `sort="score"` and
@@ -87,8 +87,9 @@ optional**: a Literature Matrix is defined by its triage decisions, so rows
 still `unreviewed` are a search dump, not a literature matrix. Save the set to
 a file, screen every record with `researcher_screen` (`core` / `general` /
 `excluded`, with a `reason` for exclusions; batch `updates=[...]` is one call),
-then render with `researcher_matrix`. Check `screening.ready` in the reply, or
-pass `require_screening=True` to have the tool refuse an unscreened set. Use
+then render with `researcher_report(kind="matrix")`. Check `screening.ready` in
+the reply, or pass `require_screening=True` to have the tool refuse an
+unscreened set. Use
 `researcher_prescreen` first for the obvious exclusions and
 `researcher_snowball` on the `core` set when the graph should broaden recall.
 

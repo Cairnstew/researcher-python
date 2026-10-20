@@ -29,7 +29,7 @@ and citable. opencode exposes its tools as `researcher_<tool>`:
 | `researcher_prescreen` | flag obvious exclusions by rule (no abstract, grant/standard/dataset, outside the year window) — reports by default |
 | `researcher_screen` | set `core`/`general`/`excluded` + notes, one record or a batch (`updates=[...]`) |
 | `researcher_snowball` | expand the `core` set through references/citations; only new records, ranked by link count |
-| `researcher_prisma` | identified → deduped → screened → included counts from the log and labels |
+| `researcher_report` | `kind="prisma"` for identified → deduped → screened → included counts; `kind="matrix"`/`"synthesis"` for the artefacts |
 | `researcher_get_paper` | one record by DOI / arXiv id / PMID |
 | `researcher_references` | works a paper cites — the prior art behind it |
 | `researcher_citations` | works citing a paper — how the field built on it |
@@ -53,9 +53,12 @@ unsure what is configured — it never leaks a key value.
 message names what to fix (usually a missing env var) — report it and continue
 with the sources that did answer rather than abandoning the round.
 
-- `search_papers` returns `papers`, `by_source` (raw per-source counts) and
-  `errors` (per-source failures). A throttled source is **normal**: it appears
-  in `errors` while the others still return records.
+- `search_papers` returns a **summary page** by default (`limit=10`): read
+  `summary`, `kept`, `has_more` and `next_offset`, then pass `offset` for the
+  next page. It also returns `by_source` (raw per-source counts) and `errors`
+  (per-source failures). A throttled source is **normal**: it appears in
+  `errors` while the others still return records. `max_results` is the
+  per-source retrieval cap, not the page size.
 - **Prefer `sort="score"` with `top_ratio` over raising `max_results`.** Each
   source ranks by a private, mutually incomparable score, so a merged set
   otherwise keeps every source's weakest hits; `max_results` caps each source
@@ -93,12 +96,15 @@ with the sources that did answer rather than abandoning the round.
   `core`, `researcher_snowball` walks their references/citations and returns
   only records not already in the workspace, ranked by how many core papers
   link to them — a stronger recall engine than another keyword query. Finish a
-  round with `researcher_prisma` for the identified → deduped → screened →
-  included counts the write-up needs.
-- **Scan with `compact=True`.** A multi-record `search_papers` reply carries a
-  full abstract per record and overflows an agent's context fast; `compact`
-  returns identity, standing, relevance and a 240-char excerpt (~74% smaller).
-  Use `get_paper` for the full record of one paper.
+  round with `researcher_report(kind="prisma")` for the identified → deduped →
+  screened → included counts the write-up needs.
+- **Work from the summary page.** `search_papers` returns identity, standing,
+  relevance and label by default — no abstracts — and pages at 10 rows. Use
+  `detail="compact"` for a 240-char excerpt, `detail="full"` or `get_paper` for
+  the complete record of one paper, and `fields=["doi","title","year"]` to
+  project exactly what you need. Paging a workspace search adds no new log row;
+  `page_source` says whether the page came from the cached search or the
+  persisted set.
 - **Standing, not just relevance.** `min_citations` filters on raw citations,
   which reward age; `citations_per_year` (a matrix column) is the age-normalised
   view and is the better triage signal. An unknown citation count is always

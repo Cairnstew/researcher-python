@@ -342,23 +342,28 @@ def test_opencode_config_command_can_actually_start_the_server():
             "find_quotes",
             "get_paper",
             "info",
-            "label",
-            "matrix",
             "open_workspace",
             "prescreen",
-            "prisma",
             "references",
+            "report",
             "screen",
-            "screen_summary",
             "search_papers",
             "snowball",
             "sources",
-            "synthesis",
             "web_search",
             "workspace_next_round",
             "workspace_status",
         ]
     )
+
+
+def test_readme_documents_every_report_kind():
+    """The four kinds are the whole contract of the consolidated report tool."""
+    import researcher_python.mcp_server as mcp_mod
+
+    text = README.read_text()
+    for kind in mcp_mod.REPORT_KINDS:
+        assert re.search(rf"kind\s*=\s*['\"]{kind}['\"]", text), kind
 
 
 def test_opencode_config_startup_timeout_exceeds_the_default():

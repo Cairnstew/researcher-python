@@ -16,6 +16,7 @@ SDK dependency at all, which is the point of keeping the logic framework-free.
 from __future__ import annotations
 
 import asyncio
+import json
 from typing import Any
 
 import pytest
@@ -24,7 +25,7 @@ import researcher_python.mcp_server as mcp_mod
 import researcher_python.sources as registry
 from researcher_python.config import Settings
 from researcher_python.errors import NotFoundError, SourceError
-from researcher_python.models import Paper
+from researcher_python.models import Author, Paper
 from researcher_python.sources.base import Capabilities, Source
 
 
@@ -126,11 +127,15 @@ def settings():
     injected = Settings(max_results=10, retries=0)
     mcp_mod._set_settings(injected)
     mcp_mod._set_workspace(None)
+    # The paging cache is process-global so pages survive between calls; a test
+    # must not inherit the previous test's fixture.
+    mcp_mod._clear_page_cache()
     try:
         yield injected
     finally:
         mcp_mod._set_workspace(None)
         mcp_mod._set_settings(None)
+        mcp_mod._clear_page_cache()
 
 
 # ---------------------------------------------------------------------- #
@@ -227,6 +232,136 @@ def test_search_unknown_sort_is_a_clean_error(fakes):
     payload = mcp_mod._tool_search("x", sources=["openalex"], sort="nonsense")
     assert payload["ok"] is False
     assert payload["error"] == "ConfigurationError"
+
+
+# ---------------------------------------------------------------------- #
+# Search summaries, paging and projection
+# ---------------------------------------------------------------------- #
+
+
+def _paging_set(n: int = 3) -> list[Paper]:
+    return [_known(f"Paper {i}", doi=f"10.1/{i}") for i in range(n)]
+
+
+def test_search_summary_is_the_default_and_is_paged(fakes):
+    SEARCHES["paging"] = _paging_set(3)
+    payload = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=2
+    )
+    assert payload["ok"] is True
+    assert payload["kept"] == 3
+    assert payload["count"] == 2
+    assert payload["has_more"] is True
+    assert payload["next_offset"] == 2
+    assert payload["summary"] == "3 kept, top 2 shown"
+    record = payload["papers"][0]
+    assert record["key"] == "10.1/0"
+    assert "abstract" not in record
+    assert "abstract_excerpt" not in record
+    assert len(record["authors"]) <= 3
+
+
+def test_search_offset_returns_the_next_page(fakes):
+    SEARCHES["paging"] = _paging_set(3)
+    payload = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=2, offset=2
+    )
+    assert payload["count"] == 1
+    assert payload["has_more"] is False
+    assert payload["next_offset"] is None
+    assert payload["papers"][0]["key"] == "10.1/2"
+    assert payload["summary"] == "3 kept, rows 3-3 shown"
+
+
+def test_search_offset_past_the_end_is_an_empty_page(fakes):
+    SEARCHES["paging"] = _paging_set(2)
+    payload = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=2, offset=99
+    )
+    assert payload["ok"] is True
+    assert payload["count"] == 0
+    assert payload["kept"] == 2
+    assert payload["has_more"] is False
+    assert payload["summary"] == "2 kept, no records shown"
+
+
+def test_search_limit_and_offset_are_validated(fakes):
+    for kwargs in ({"limit": 0}, {"limit": -1}, {"offset": -1}):
+        payload = mcp_mod._tool_search("x", sources=["openalex"], **kwargs)
+        assert payload["ok"] is False
+        assert payload["error"] == "ConfigurationError"
+
+
+def test_search_fields_projects_exactly_and_wins_over_detail(fakes):
+    SEARCHES["paging"] = _paging_set(1)
+    payload = mcp_mod._tool_search(
+        "paging",
+        sources=["openalex"],
+        max_results=10,
+        fields=["doi", "title", "year", "key"],
+        detail="full",
+    )
+    assert set(payload["papers"][0]) == {"doi", "title", "year", "key"}
+    assert payload["papers"][0]["key"] == "10.1/0"
+
+
+def test_search_unknown_field_is_actionable(fakes):
+    payload = mcp_mod._tool_search(
+        "x", sources=["openalex"], fields=["doi", "not_a_field"]
+    )
+    assert payload["ok"] is False
+    assert payload["error"] == "ConfigurationError"
+    assert "not_a_field" in payload["message"]
+    assert "title" in payload["message"]
+
+
+def test_search_detail_full_returns_the_complete_record(fakes):
+    SEARCHES["paging"] = [_known("Paper", doi="10.1/a", abstract="full abstract")]
+    payload = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, detail="full"
+    )
+    assert payload["papers"][0]["abstract"] == "full abstract"
+    assert "summary" in payload
+
+
+def test_search_detail_compact_adds_an_excerpt(fakes):
+    SEARCHES["paging"] = [
+        _known("Paper", doi="10.1/a", abstract="word " * 400)
+    ]
+    payload = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, detail="compact"
+    )
+    record = payload["papers"][0]
+    assert record["abstract_excerpt"].endswith("\u2026")
+    assert "abstract" not in record
+
+
+def test_search_size_drops_materially_from_full_to_summary(fakes):
+    SEARCHES["paging"] = [
+        _known(
+            f"Paper {i}",
+            doi=f"10.1/{i}",
+            abstract="word " * 400,
+            authors=[Author(f"Author {j}") for j in range(6)],
+        )
+        for i in range(30)
+    ]
+    full = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=30, detail="full", limit=None
+    )
+    summary = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=30, detail="summary", limit=30
+    )
+    fields = mcp_mod._tool_search(
+        "paging",
+        sources=["openalex"],
+        max_results=30,
+        limit=30,
+        fields=["doi", "title", "year", "venue", "citation_count", "relevance", "label"],
+    )
+    full_bytes = len(json.dumps(full))
+    assert len(json.dumps(summary)) < full_bytes * 0.2
+    assert len(json.dumps(fields)) < full_bytes * 0.1
 
 
 # ---------------------------------------------------------------------- #
@@ -361,6 +496,18 @@ def test_build_server_registers_every_declared_tool():
     assert asyncio.run(names()) == sorted(mcp_mod.TOOLS)
 
 
+def test_tools_list_payload_stays_within_the_context_budget():
+    """Every client pays this catalogue in its context; keep it under 20 KB."""
+    _require_mcp()
+    server = mcp_mod.build_server(Settings())
+
+    async def size():
+        tools = await server.list_tools()
+        return len(json.dumps([t.model_dump() for t in tools]))
+
+    assert asyncio.run(size()) < 20_000
+
+
 def test_build_server_tool_help_is_populated():
     _require_mcp()
     server = mcp_mod.build_server(Settings())
@@ -416,7 +563,7 @@ def test_open_workspace_makes_search_persist(fakes, tmp_path):
     assert first["counts"]["total"] == 1
     assert first["workspace"]["path"].endswith("ws")
     assert first["meta"]["params"]["query"] == "attention"
-    assert first["meta"]["by_source"]["openalex"] == 1
+    assert first["by_source"]["openalex"] == 1
 
     second = mcp_mod._tool_search("attention", sources=["openalex"], max_results=5)
     assert second["counts"]["new"] == 0
@@ -427,6 +574,60 @@ def test_open_workspace_makes_search_persist(fakes, tmp_path):
     assert status["ok"] is True
     assert status["workspace"]["counts"]["records"] == 1
     assert status["workspace"]["log_rows"] == 2
+
+
+def test_workspace_paging_does_not_append_a_log_row(fakes, tmp_path):
+    """A page request must reuse the first result, never search twice."""
+    SEARCHES["paging"] = _paging_set(3)
+    workspace = str(tmp_path / "ws")
+    mcp_mod._tool_open_workspace(workspace)
+
+    first = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=1
+    )
+    assert first["page_source"] == "search"
+    assert first["count"] == 1
+    assert first["kept"] == 3
+    assert first["counts"]["new"] == 3
+    assert first["counts"]["total"] == 3
+    search_id = first["workspace"]["search_id"]
+
+    second = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=1, offset=1
+    )
+    assert second["page_source"] == "cached_search"
+    assert second["workspace"]["search_id"] == search_id
+    assert second["count"] == 1
+    assert second["kept"] == 3
+
+    # One log row, one search id, and all three records persisted — not a page.
+    status = mcp_mod._tool_workspace_status(workspace)["workspace"]
+    assert status["log_rows"] == 1
+    assert status["counts"]["records"] == 3
+
+
+def test_workspace_paging_falls_back_to_the_persisted_set_without_writing(
+    fakes, tmp_path
+):
+    """A restart (or changed search) still pages read-only, with no new row."""
+    SEARCHES["paging"] = _paging_set(3)
+    workspace = str(tmp_path / "ws")
+    mcp_mod._tool_open_workspace(workspace)
+    first = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=1
+    )
+    mcp_mod._clear_page_cache()
+
+    second = mcp_mod._tool_search(
+        "paging", sources=["openalex"], max_results=10, limit=1, offset=1
+    )
+    assert second["page_source"] == "workspace_set"
+    assert second["workspace"]["search_id"] == first["workspace"]["search_id"]
+    assert "no new search or log row" in second["hint"]
+
+    status = mcp_mod._tool_workspace_status(workspace)["workspace"]
+    assert status["log_rows"] == 1
+    assert status["counts"]["records"] == 3
 
 
 def test_search_without_a_workspace_stays_pure(fakes, tmp_path, monkeypatch):

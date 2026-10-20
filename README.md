@@ -908,16 +908,27 @@ CLI stay lightweight and work without it.
 | `download_pdf` | fetch the open-access PDF | `download.download_pdf` |
 | `bibliography` | render BibTeX / RIS / CSL-JSON | `format.render_*` |
 | `web_search` | Stack Overflow / Reddit records | `web_sources.web_search` |
-| `matrix` | Literature Matrix (CSV/Markdown) | `matrix.render_matrix_*` |
-| `synthesis` | Synthesis Matrix + screening counts | `matrix.render_synthesis_*` |
-| `screen_summary` | counts per triage label | `matrix.screen_summary` |
-| `label` | set labels / notes on a saved result set or workspace | `Paper.label_as` / `.note` |
-| `screen` | verb alias of `label`; accepts a batch of updates | `screening.apply_updates` |
+| `screen` | set labels / notes on a saved set or workspace; accepts a batch | `screening.apply_updates` |
 | `prescreen` | flag obvious exclusions by rule (report by default) | `screening.prescreen` |
 | `snowball` | expand the core set through the citation graph | `snowball.expand` |
-| `prisma` | identified/deduped/screened/included flow | `prisma.prisma_report` |
+| `report` | one report tool: `kind=` matrix, synthesis, screening or prisma | `matrix.*` / `prisma.prisma_report` |
 | `extract_text` | plain text of a local PDF | `extract.extract_text` |
 | `find_quotes` | page-anchored quotes from a PDF | `extract.find_quotes` |
+
+**One report tool, four kinds.** `report(kind=...)` replaces the separate
+`matrix`, `synthesis`, `screen_summary` and `prisma` tools (and `screen`
+replaces the duplicate `label` tool):
+
+| `kind` | Inputs | Output |
+|---|---|---|
+| `kind="matrix"` | ids / query / `from_file` / `workspace`, `columns`, `format` (`csv`\|`markdown`), `require_screening` | Literature Matrix, one row per paper |
+| `kind="synthesis"` | same inputs, `dimension` (`label`/`year`/`type`/`venue`/`open_access`) | dimension × triage-label counts + screening summary |
+| `kind="screening"` | ids / query / `from_file` / `workspace` | counts per triage label + `ready`/`message` |
+| `kind="prisma"` | `workspace` only, `format` (`json`\|`markdown`) | identified → deduped → screened → included |
+
+`screen_summary` is accepted as an alias for `screening`. A kind-specific
+argument used with the wrong kind is a `ConfigurationError`, not a silent
+no-op (e.g. `columns` with matrix only, `dimension` with synthesis only).
 
 Example client configuration (spawns the console script over stdio):
 
@@ -999,22 +1010,49 @@ floors and `min_citations`, and returns each record's `relevance` plus the
 `terms` scored against and the number `dropped`, with a `hint` when the set is
 empty for a guessable reason.
 
+**Response budget.** A search reply is a *summary page* by default, not a dump:
+
+| Knob | Meaning | Default |
+|---|---|---|
+| `max_results` | per-source retrieval cap | `10` |
+| `limit` | page size of the **merged** set (`null` = all) | `10` |
+| `offset` | rows to skip after merge/dedupe/floors/sort | `0` |
+| `detail` | `summary` (no abstract), `compact` (240-char excerpt) or `full` | `summary` |
+| `fields` | exact top-level projection; wins over `detail` | `null` |
+
+The reply carries `summary` (`"143 kept, 3 sources errored, top 10 shown"`),
+`kept`, `count` (this page), `has_more` and `next_offset`, so an agent can quote
+the shape and pull the next page without guessing. `fields=["doi","title"]`
+returns exactly those keys; an unknown field is a `ConfigurationError` listing
+the valid ones rather than a row of nulls. `get_paper` remains the one-record
+detail path.
+
+Measured on a 30-record fixture with 400-word abstracts: a full reply was
+**107 KB**, the summary projection **12.3 KB**, and the new default page
+(summary + `limit=10`) **4.3 KB** — about 25× smaller than the old shape.
+
 **Workspace persistence.** Call `open_workspace(path)` once (or pass
 `workspace="path"` on a call) and `search_papers` persists automatically: it
 merges into `results.json`, appends the log entry and returns
 `persisted: true` with `counts.new` / `counts.seen` / `counts.screened` /
-`counts.total` plus a `meta` block containing the params, `by_source` and
-errors. Without a workspace the tool stays pure and returns
-`persisted: false`. `matrix`, `synthesis`, `screen_summary`, `bibliography` and
-`label` accept `workspace=` as an alternative to `from_file=`. Pass **`compact=True`** for a triage-sized
-projection (identity, standing, relevance, a 240-character abstract excerpt)
-instead of the full record — measured at ~74% smaller, which is the difference
-between fitting an agent's context and not. `matrix`, `synthesis` and `screen_summary` return a
-`screening` report (`ready` / `message`) and accept
-`require_screening=True` to refuse an unscreened set. The server's
-**instructions** state both, so an MCP client is told to prefer a scored search
-with a floor over a bigger `max_results`, and that screening — not searching —
-is what turns a result set into a Literature Matrix.
+`counts.total` plus a `meta` block containing the round, `search_id` and
+params. Without a workspace the tool stays pure and returns `persisted:
+false`.
+
+**Paging never writes.** A page after the first reuses the in-process result of
+the first call, so it appends **no** search-log row and mints **no** second
+`search_id`; the full result is still merged into `results.json`. If that
+result is gone (server restart or changed parameters), a workspace page is
+served read-only from the persisted set. `page_source` says which happened:
+`search`, `cached_search` or `workspace_set`.
+
+`report(kind=...)`, `bibliography` and `screen` accept `workspace=` as an
+alternative to `from_file=`. The `matrix` and `synthesis` kinds return a
+`screening` report (`ready` / `message`) and accept `require_screening=True` to
+refuse an unscreened set. The server's **instructions** state all of this, so
+an MCP client is told to page rather than dump, to prefer a scored search with
+a floor over a bigger `max_results`, and that screening — not searching — is
+what turns a result set into a Literature Matrix.
 
 ## Errors
 
