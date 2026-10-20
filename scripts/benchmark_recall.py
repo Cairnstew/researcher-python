@@ -1,5 +1,9 @@
 #!/usr/bin/env python3
-"""Offline recall/dedupe benchmark for a saved result set.
+"""Offline dedupe/identity benchmark for a saved result set.
+
+This measures whether the *merge* preserves the gold papers.  For query-level
+recall — how many gold papers a relevance score and ``min_score``/``top_ratio``
+configuration surfaces, and at what rank — use ``scripts/benchmark_search.py``.
 
 The CW1 corpus is 1,077 screened records with a hand-screened 103-paper core.
 Feature 1 (type filter), Feature 2 (citation backfill) and Feature 3 (version

@@ -395,22 +395,24 @@ Every record carries the score as `Paper.relevance` (round-tripping through
 | floor | meaning | when |
 |---|---|---|
 | `min_score` (0.0–1.0) | absolute | you know the bar, e.g. "must mention most terms" |
-| `top_ratio` (0.0<R≤1.0) | keep records ≥ `R × the best score` | **usually better** — cuts a result set to its top tier |
+| `top_ratio` (0.0<R≤1.0) | keep records ≥ `R × the best score` | a precision lever — measure it against a gold set before trusting it |
 
-`top_ratio` is scale-free. `min_score` does not scale with query length: on a
-six-term query almost any on-subject paper matches two or three terms, so a
-`min_score` of `0.25` removed **nothing** on a real LSEP search. They compose —
-the absolute floor removes junk, the relative one cuts the tail.
+`top_ratio` is scale-free, which makes it attractive — but the gold benchmark
+> puts a number on what it costs. Replaying all 22 CW1 queries against the
+> 1,674-record pool, `top_ratio=0.5` kept **86/103** core papers and `0.6` kept
+> **76/103**, while `min_score=0.20` kept **102/103**. A relative floor cannot
+> distinguish "marginally relevant" from "topically irrelevant", so on a real
+> workload it trades recall for a tidy list.
 
-> **Raise `top_ratio` with care.** On a real six-term query, `0.4` and `0.5` cut
-> exactly the same eight records (39 → 31), and every one was noise — AGI
-> philosophy, unrelated topics. `0.6` additionally dropped *The Malicious Use of
-> AI*, which is squarely on topic. A relative floor cannot distinguish
-> "marginally relevant" from "topically irrelevant", so an aggressive ratio
-> trades real recall for a tidy list. `relevance.DEFAULT_TOP_RATIO` is `0.5`.
-> Scores tend to cluster with a gap after the weak tail, so a **plateau** (two
-> ratios cutting an identical set) is your signal that you found the natural
-> break rather than cutting into signal.
+`min_score` does not scale with query length: on a six-term query almost any
+on-subject paper matches two or three terms, so a `min_score` of `0.25` removed
+**nothing** on a real LSEP search. The floors compose — the absolute floor
+removes junk, the relative one cuts the tail — but start from the measured
+safe floor (`0.20`) and only raise `top_ratio` after re-running the benchmark.
+Scores tend to cluster with a gap after the weak tail, so a **plateau** (two
+ratios cutting an identical set) is your signal that you found the natural
+break rather than cutting into signal. `relevance.DEFAULT_TOP_RATIO` is `0.5`
+as a starting point, not a recommendation.
 
 ```python
 import researcher_python as rp
@@ -429,6 +431,54 @@ for paper in rp.sort_papers(result.papers, "score"):
 rp.score_papers(result.papers, "legal issues of artificial intelligence")
 kept, dropped = rp.filter_by_score(result.papers, min_score=0.4, top_ratio=0.6)
 ```
+
+**Measure the trade-off against a gold set.** Once a topic has a hand-screened
+core, `scripts/benchmark_search.py` replays every query in a workspace search
+log against the saved candidate pool and reports what each scoring/floor
+configuration surfaces, at what rank:
+
+```console
+$ python scripts/benchmark_search.py \
+    --pool research-out/cw1-workspace/results.json \
+    --gold research-out/cw1-core-merged-103.json \
+    --search-log research-out/cw1-workspace/search-log.jsonl \
+    --out research-out/recall-baseline.json
+gold 103 | in pool 103 | queries 22 | k [5, 10, 20]
+configuration                    kept   purity  R@5  R@10  R@20  coverage  MRR    median  p90
+scoped: none                     17612  0.061   6    14    25    103/103   0.055  55      169
+scoped: min 0.20                 5247   0.085   6    14    25    102/103   0.055  54.5    169
+scoped: top 0.50                 2007   0.080   6    14    25    86/103    0.054  51.0    121
+scoped: top 0.60                 1713   0.076   6    14    25    76/103    0.053  39.0    129
+```
+
+`coverage` is the headline: how many of the gold papers survive in **any**
+query's kept set. `recall_at_k` asks the stricter "in somebody's first page"
+question, while `purity` shows what the floor bought. The grid also varies the
+score's own weighting (`relevance: title-heavy`, `coverage only`,
+`density half`), so the formula is measured rather than assumed. The pool is
+fixed, so the numbers isolate the score and the floors from source-side
+retrieval. `--gold` is optional when the pool already carries screening
+labels; omitting it uses every `label: core` record as the gold set.
+
+On this corpus, the shipped `0.75 × coverage + 0.25 × density` split ranked the
+gold papers worse than coverage alone: `R@10` 14 → 20, `R@20` 25 → 32 and MRR
+0.055 → 0.085 at the same 103/103 coverage. `coverage only + min 0.30` keeps
+102/103 with purity 0.083. Those are evidence for a future default change, not
+a silent one — the shipped weights and defaults are unchanged.
+
+The committed fixture (`tests/fixtures/recall_benchmark.json`) is a small slice
+of the same corpus: six real queries, 26 core papers and hard negatives.
+`tests/test_recall_benchmark.py` pins its baseline recall, so a scoring change
+cannot silently lose a paper:
+
+```console
+$ just recall-fixture
+$ just test-kw recall
+```
+
+Use `--baseline report.json --fail-on-drop` to make the same check in CI
+against a full-corpus report; it exits `2` when coverage or the largest
+`recall@k` falls.
 
 ### Ergonomics and triage, from real use
 
@@ -1127,9 +1177,10 @@ name added to `TOOLS`.
   paper is on topic while using entirely different words ("governance" vs
   "oversight"), so a synonym-rich or badly-worded query still needs the
   `min_score`/`top_ratio` floors checked by eye, or a `field`/`query` rephrase.
-- **An aggressive `top_ratio` costs recall.** See the warning above: `0.6`
-  removed a squarely on-topic paper in testing. Prefer `0.5`, and treat a
-  plateau in the `dropped` count as the signal to stop.
+- **`top_ratio` costs recall on a real workload.** The CW1 gold benchmark keeps
+  86/103 core papers at `0.5` and 76/103 at `0.6`; `min_score=0.20` keeps
+  102/103. Prefer the measured absolute floor, and treat a plateau in the
+  `dropped` count as the signal to stop raising the ratio.
 - **Not a substitute for the reading packs.** Policy trackers (IAPP, Norton
   Rose), legislation databases and paywalled textbooks still need manual
   lookup; `openaire` covers repositories and theses, not statutory sources.

@@ -542,3 +542,69 @@ class TestZeroResultHint:
         )
         assert result.papers
         assert result.hint == ""
+
+
+class TestScoringOverrides:
+    """Experimental weights stay opt-in and never change the default score."""
+
+    def test_overrides_equal_to_defaults_reproduce_the_default_score(self) -> None:
+        terms = relevance.query_terms("legal liability artificial intelligence")
+        assert relevance.score_paper(ON_TOPIC, terms) == relevance.score_paper(
+            ON_TOPIC,
+            terms,
+            field_weights=dict(relevance.FIELD_WEIGHTS),
+            phrase_bonus=0.10,
+            coverage_weight=0.75,
+        )
+
+    def test_coverage_weight_selects_coverage_or_density(self) -> None:
+        # A covers every term once; B repeats one term heavily.  Coverage
+        # favours A, density favours B, so the weight must decide the winner.
+        query = "alpha beta gamma"
+        terms = relevance.query_terms(query)
+        broad = _paper(title="alpha beta gamma " + "filler " * 30)
+        repetitive = _paper(title="alpha " * 40)
+        coverage_only = relevance.score_paper(broad, terms, coverage_weight=1.0)
+        density_only = relevance.score_paper(broad, terms, coverage_weight=0.0)
+        assert coverage_only > density_only
+        assert relevance.score_paper(
+            repetitive, terms, coverage_weight=0.0
+        ) > relevance.score_paper(broad, terms, coverage_weight=0.0)
+
+    def test_field_weight_override_can_promote_the_title(self) -> None:
+        terms = relevance.query_terms("liability")
+        # The title is denser than the abstract, so weighting it higher raises
+        # the density term without either side saturating to 1.0.
+        paper = _paper(
+            title="On liability law",
+            abstract=("liability " * 10) + ("filler " * 30),
+        )
+        default = relevance.score_paper(paper, terms)
+        title_heavy = relevance.score_paper(
+            paper, terms, field_weights={"title": 20.0, "abstract": 0.1}
+        )
+        assert title_heavy > default
+
+    def test_unknown_field_weight_is_ignored(self) -> None:
+        terms = relevance.query_terms("liability")
+        assert relevance.score_paper(
+            ON_TOPIC, terms, field_weights={"not_a_field": 99.0}
+        ) == relevance.score_paper(ON_TOPIC, terms)
+
+    def test_negative_field_weight_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="non-negative"):
+            relevance.score_paper(
+                ON_TOPIC, relevance.query_terms("liability"), field_weights={"title": -1}
+            )
+
+    def test_bad_coverage_weight_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="coverage_weight"):
+            relevance.score_paper(
+                ON_TOPIC, relevance.query_terms("liability"), coverage_weight=1.5
+            )
+
+    def test_negative_phrase_bonus_is_rejected(self) -> None:
+        with pytest.raises(ValueError, match="phrase_bonus"):
+            relevance.score_paper(
+                ON_TOPIC, relevance.query_terms("liability"), phrase_bonus=-0.1
+            )

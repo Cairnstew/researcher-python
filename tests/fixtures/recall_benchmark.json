@@ -1,0 +1,1312 @@
+{
+  "description": "Small CW1 recall fixture: 6 real queries, gold slices and hard negatives sampled from the 1,674-record screened pool.",
+  "queries": [
+    {
+      "query": "code of ethics",
+      "field": "title"
+    },
+    {
+      "query": "professional ethics",
+      "field": "title"
+    },
+    {
+      "query": "AI practitioner",
+      "field": "title"
+    },
+    {
+      "query": "computing ethics",
+      "field": "title"
+    },
+    {
+      "query": "ethical decision making software engineers",
+      "field": "any"
+    },
+    {
+      "query": "algorithmic auditing",
+      "field": "any"
+    }
+  ],
+  "papers": [
+    {
+      "doi": "10.1145/3351095.3372873",
+      "arxiv_id": "2001.00973",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Closing the AI accountability gap",
+      "abstract": "Rising concern for the societal implications of artificial intelligence systems has inspired a wave of academic and journalistic literature in which deployed systems are audited for harm by investigators from outside the organizations deploying the algorithms. However, it remains challenging for practitioners to identify the harmful repercussions of their own systems prior to deployment, and, once deployed, emergent issues can become difficult or impossible to trace back to their source.",
+      "year": 2020,
+      "venue": "FAT*",
+      "work_type": "conference-paper",
+      "keywords": [
+        "AI accountability",
+        "algorithmic auditing",
+        "harm detection",
+        "algorithmic transparency",
+        "societal impact of AI",
+        "algorithmic governance"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Explainable Artificial Intelligence (XAI)",
+        "Safety Systems Engineering in Autonomy"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "",
+      "arxiv_id": "2303.00651",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Algorithmic Governance for Explainability: A Comparative Overview of Progress and Trends",
+      "abstract": "The explainability of AI has transformed from a purely technical issue to a complex issue closely related to algorithmic governance and algorithmic security. The lack of explainable AI (XAI) brings adverse effects that can cross all economic classes and national borders. Despite efforts in governance, technical, and policy exchange have been made in XAI by multiple stakeholders, including the public sector, enterprises, and international organizations, respectively. XAI is still in its infancy. ",
+      "year": 2023,
+      "venue": "",
+      "work_type": "preprint",
+      "keywords": [],
+      "categories": [
+        "cs.CY"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1086/227762",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Professional Ethics",
+      "abstract": "Through comparative analysis, this paper estabilishes five basic properties of professional ethics codes: universal distribution, correlation with intraprofessional status, enforcement dependent on visibility, individualism, and emphasis on colleage obligations. After discussing traditional explanations of these properties from the functionalist and monopolist perspectives, the paper adds a third perspective,relating ethics directly to intra-and extrapofessional status. A final section analyzing",
+      "year": 1983,
+      "venue": "American Journal of Sociology",
+      "work_type": "article",
+      "keywords": [
+        "professional ethics",
+        "professional ethics code",
+        "professional status",
+        "individualism",
+        "functionalism"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Management and Organizational Studies",
+        "Ethics in medical practice"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1136/jme.21.6.365",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The ground of professional ethics",
+      "abstract": "",
+      "year": 1995,
+      "venue": "Journal of Medical Ethics",
+      "work_type": "article",
+      "keywords": [
+        "professional ethics",
+        "foundations of ethics",
+        "medical ethics"
+      ],
+      "categories": [
+        "Ethics and bioethics in healthcare",
+        "Ethics in medical practice",
+        "Health, Medicine and Society"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1177/002248718603700301",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Teaching Professional Ethics",
+      "abstract": "Soltis discusses the importance of teach ing professional ethics in teacher educa tion programs. Formal ethical codes, such as the one established by the NEA, provide a foundation for ethical deci sion-rnaking, but they also may leave prospective teachers ill-equipped to deal with the complexities of novel or unique problem situations. Teacher educators, argues the author, should raise the ethi cal corasciousrsess of preservice teach ers to the multiple moral realities of the work world. Once su",
+      "year": 1986,
+      "venue": "Journal of Teacher Education",
+      "work_type": "article",
+      "keywords": [
+        "professional ethics",
+        "teacher professional development",
+        "pre-service teachers",
+        "ethical decision-making",
+        "code of ethics",
+        "National Education Association",
+        "moral consciousness",
+        "moral relativism"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Education, Philosophy, and Society",
+        "Teacher Education and Leadership Studies"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.2307/40224160",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Statement on Professional Ethics",
+      "abstract": "William H. McPherson, David M. Bevington, John A. Christie, Philip Denenfeld, Kenneth E. Eble, Joseph M. Nygaard, Henry T. Yost, Statement on Professional Ethics, AAUP Bulletin, Vol. 52, No. 3 (Sep., 1966), pp. 290-291",
+      "year": 1966,
+      "venue": "AAUP Bulletin",
+      "work_type": "article",
+      "keywords": [
+        "professional ethics",
+        "academic freedom",
+        "faculty ethics",
+        "American Association of University Professors"
+      ],
+      "categories": [
+        "Academic Freedom and Politics",
+        "Academic integrity and plagiarism",
+        "Education, Philosophy, and Society"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1016/b978-0-08-100144-8.00018-6",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Code of professional ethics",
+      "abstract": "",
+      "year": 2015,
+      "venue": "Elsevier eBooks",
+      "work_type": "book-chapter",
+      "keywords": [
+        "professional ethics",
+        "zoos",
+        "aquariums",
+        "Association of Zoos and Aquariums",
+        "moral behavior",
+        "professional responsibility"
+      ],
+      "categories": [
+        "Conservation, Ecology, Wildlife Education",
+        "Ethics in Business and Education",
+        "Animal Law and Welfare"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1007/bf00382829",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Professional ethics: Business students' perceptions",
+      "abstract": "",
+      "year": 1991,
+      "venue": "Journal of Business Ethics",
+      "work_type": "article",
+      "keywords": [
+        "professional ethics",
+        "business students",
+        "ethics education",
+        "business school curriculum"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Management and Marketing Education",
+        "Academic integrity and plagiarism"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1093/llc/fqac073",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Applying AI to digital archives: trust, collaboration and shared professional ethics",
+      "abstract": "Policy makers produce digital records on a daily basis. A selection of records is then preserved in archival repositories. However, getting access to these archival materials is extremely complicated for many reasons—including data protection, sensitivity, national security, and copyright. Artificial Intelligence (AI) can be applied to archives to make them more accessible, but it is still at an experimental stage. While skills gaps contribute to keeping archives ‘dark’, it is also essential to ",
+      "year": 2022,
+      "venue": "Digital Scholarship in the Humanities",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/2939672.2945386",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Algorithmic Bias",
+      "abstract": "Algorithms and decision making based on Big Data have become pervasive in all aspects of our daily lives lives (offline and online), as they have become essential tools in personal finance, health care, hiring, housing, education, and policies. It is therefore of societal and ethical importance to ask whether these algorithms can be discriminative on grounds such as gender, ethnicity, or health status. It turns out that the answer is positive: for instance, recent studies in the context of onlin",
+      "year": 2016,
+      "venue": "ACM SIGKDD International Conference on Knowledge Discovery and Data Mining (KDD)",
+      "work_type": "conference-paper",
+      "keywords": [
+        "algorithmic bias",
+        "algorithmic discrimination",
+        "big data",
+        "online advertising",
+        "gender discrimination",
+        "racial discrimination",
+        "historical discrimination",
+        "sensitive attributes"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Privacy-Preserving Technologies in Data",
+        "Discrimination and Equality Law"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.5553/elr.000190",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Big Data Ethics: A Life Cycle Perspective",
+      "abstract": "The adoption of big data analysis in the legal domain is a recent but growing trend that highlights ethical concerns not just with big data analysis, as such, but also with its deployment in the legal domain. This article systematically analyses five big data use cases from the legal domain utilising a pluralistic and pragmatic mode of ethical reasoning. In each case we analyse what happens with data from its creation to its eventual archival or deletion, for which we utilise the concept of ‘dat",
+      "year": 2021,
+      "venue": "Erasmus Law Review",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.12781/issn.17418224",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "AI Practitioner",
+      "abstract": "",
+      "year": 2026,
+      "venue": "AI Practitioner",
+      "work_type": "paratext",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.12781/978-1-907549-17-5-10",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "AI Practitioner November 2013 - AI Resources",
+      "abstract": "",
+      "year": 2013,
+      "venue": "AI Practitioner",
+      "work_type": "article",
+      "keywords": [
+        "AI practitioners"
+      ],
+      "categories": [
+        "Artificial Intelligence Applications",
+        "Computer Science and Engineering",
+        "Machine Learning and Algorithms"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.12781/978-1-907549-17-5-9",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "AI Practitioner November 2013 - Research Notes",
+      "abstract": "",
+      "year": 2013,
+      "venue": "AI Practitioner",
+      "work_type": "article",
+      "keywords": [],
+      "categories": [
+        "Artificial Intelligence Applications",
+        "Machine Learning and Algorithms",
+        "Computer Science and Engineering"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.12781/978-1-907549-42-7-1",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "AI Practitioner: The Open Issue",
+      "abstract": "This issue of AI Practitioner, edited by the co-publishers and the managing editor, begins the new year with a new approach: an open issue. In it there is no overall topic, no link between the seven articles other than the authors’ interest in and exploration of Appreciative Inquiry and its principles.",
+      "year": 2020,
+      "venue": "AI Practitioner",
+      "work_type": "article",
+      "keywords": [
+        "appreciative inquiry",
+        "organizational change",
+        "organizational development"
+      ],
+      "categories": [
+        "Appreciative Inquiry and Organizational Change",
+        "Artificial Intelligence Applications",
+        "Information Systems Theories and Implementation"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.4324/9781003606802-4",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The Regenerative AI Practitioner",
+      "abstract": "Many designers wrestle with an internal, creative conflict. We consider ourselves authentic practitioners who have developed discrete tacit knowledge and skills which underpin how we practice our craft. Yet, many of us continue to serve a capitalist system that undermines our creative motivation and authorship. Our work is often reduced to a transient commodity that drives superfluous mass production and consumption. Through our designs, we create carbon emissions, waste and deplete precious nat",
+      "year": 2026,
+      "venue": "Routledge eBooks",
+      "work_type": "book-chapter",
+      "keywords": [
+        "AI-assisted design",
+        "regenerative design",
+        "design practice",
+        "creative authorship",
+        "environmental impact of design",
+        "climate crisis",
+        "sustainability transitions"
+      ],
+      "categories": [
+        "Sustainable Design and Development",
+        "Design Education and Practice",
+        "Digital Media and Visual Art"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1145/3600211.3604702",
+      "arxiv_id": "2205.03946",
+      "pmid": "",
+      "pmcid": "",
+      "title": "What does it mean to be a responsible AI practitioner: An ontology of roles and skills",
+      "abstract": "With the growing need to regulate AI systems across a wide variety of application domains, a new set of occupations has emerged in the industry. The so-called responsible Artificial Intelligence (AI) practitioners or AI ethicists are generally tasked with interpreting and operationalizing best practices for ethical and safe design of AI systems. Due to the nascent nature of these roles, however, it is unclear to future employers and aspiring AI ethicists what specific function these roles serve ",
+      "year": 2022,
+      "venue": "AAAI/ACM Conference on AI, Ethics, and Society",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3742800.3742835",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Solutions & Challenges of AI Practitioners in AI Act Compliance",
+      "abstract": "The European Union’s Artificial Intelligence Act is a new regulation aimed at ensuring the safe and ethical use of artificial intelligence systems within the EU. This paper investigates the practical impact of the AI Act on the work of AI practitioners. We conducted a qualitative study based on seven semi-structured interviews with AI experts. Our results show organisations face considerable uncertainty when it comes to integrating the new regulatory requirements into their provision processes. ",
+      "year": 2025,
+      "venue": "Publication Server of Bonn-Rhein-Sieg University of Applied Sciences (Bonn-Rhein-Sieg University of Applied Sciences)",
+      "work_type": "conference-paper",
+      "keywords": [
+        "EU AI Act",
+        "AI regulation",
+        "AI practitioners",
+        "regulatory compliance",
+        "AI governance",
+        "transparency and explainability",
+        "AI monitoring",
+        "AI ethics"
+      ],
+      "categories": [
+        "Digitalization, Law, and Regulation",
+        "Ethics and Social Impacts of AI",
+        "Explainable Artificial Intelligence (XAI)",
+        "Law, AI, and Intellectual Property"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3512899",
+      "arxiv_id": "2112.05675",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Assessing the Fairness of AI Systems: AI Practitioners' Processes, Challenges, and Needs for Support",
+      "abstract": "Various tools and practices have been developed to support practitioners in identifying, assessing, and mitigating fairness-related harms caused by AI systems. However, prior research has highlighted gaps between the intended design of these tools and practices and their use within particular contexts, including gaps caused by the role that organizational factors play in shaping fairness work. In this paper, we investigate these gaps for one such practice: disaggregated evaluations of AI systems",
+      "year": 2022,
+      "venue": "Proceedings of the ACM on Human-Computer Interaction",
+      "work_type": "article",
+      "keywords": [
+        "algorithmic fairness",
+        "AI practitioners",
+        "performance gap",
+        "demographic groups",
+        "performance indicators",
+        "stakeholder engagement",
+        "organizational factors",
+        "technology companies"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Explainable Artificial Intelligence (XAI)",
+        "AI and HR Technologies"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3635715",
+      "arxiv_id": "2307.10057",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Ethics in the Age of AI: An Analysis of AI Practitioners’ Awareness and Challenges",
+      "abstract": "Ethics in AI has become a debated topic of public and expert discourse in recent years. But what do people who build AI—AI practitioners—have to say about their understanding of AI ethics and the challenges associated with incorporating it into the AI-based systems they develop? Understanding AI practitioners’ views on AI ethics is important as they are the ones closest to the AI systems and can bring about changes and improvements. We conducted a survey aimed at understanding AI practitioners’ ",
+      "year": 2023,
+      "venue": "ACM Transactions on Software Engineering and Methodology",
+      "work_type": "article",
+      "keywords": [
+        "AI ethics",
+        "AI practitioners",
+        "moral consciousness",
+        "ethical AI development",
+        "privacy preservation",
+        "security (computing)",
+        "ethics training"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Ethics in Business and Education",
+        "Flooding and Environmental Impact"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1609/aaai.v31i1.11139",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Why Teaching Ethics to AI Practitioners Is Important",
+      "abstract": "We argue that it is crucial to the future of AI that our students be trained in multiple complementary modes of ethical reasoning, so that they may make ethical design and implementation choices, ethical career decisions, and that their software will be programmed to take into account the complexities of acting ethically in the world.",
+      "year": 2017,
+      "venue": "Proceedings of the AAAI Conference on Artificial Intelligence",
+      "work_type": "conference-paper",
+      "keywords": [
+        "ethics education",
+        "AI practitioners",
+        "moral reasoning",
+        "ethical design",
+        "AI ethics"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Ethics in Business and Education",
+        "Flooding and Environmental Impact"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.4018/978-1-59904-937-3.ch223",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Computing Ethics",
+      "abstract": "Computers are a vehicle for the information age, and are central to the dispersal of descriptive accounts of technology, and to interactive discussion between growing communities. Despite the commitment of all countries to free flow of information and access to knowledge sources based upon social justice there are still ethical problems of the digital divide. The attitudes of respondents towards science and computers in both Japan and Thailand is compared between 1993 and a decades later. There ",
+      "year": 2008,
+      "venue": "IGI Global eBooks",
+      "work_type": "book-chapter",
+      "keywords": [
+        "computer ethics",
+        "digital divide",
+        "attitudes toward science and technology",
+        "information technology policy",
+        "Japan",
+        "Thailand",
+        "social justice",
+        "access to information"
+      ],
+      "categories": [
+        "Information Society and Technology Trends",
+        "Ethics and Social Impacts of AI",
+        "Gender and Technology in Education"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Global Computing Ethics",
+      "abstract": "",
+      "year": 2012,
+      "venue": "",
+      "work_type": "article",
+      "keywords": [
+        "computer ethics",
+        "global ethics"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Ethics in Business and Education",
+        "History of Computing Technologies"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1145/3408877.3432468",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Computing Ethics Narratives",
+      "abstract": "The prevention of criminal activity has changed dramatically over the past two decades, largely due to the increased reliance on systems that provide crime data analysis. Created specifically for police, judicial sentencing, and prison applications, these systems conduct both predictive and retrospective analysis to aid decision making within the criminal justice system. Furthermore, these software platforms typically combine spatial informatics packages and advanced statistical features behind ",
+      "year": 2021,
+      "venue": "ACM Technical Symposium on Computer Science Education (SIGCSE)",
+      "work_type": "conference-paper",
+      "keywords": [
+        "predictive policing",
+        "algorithmic bias",
+        "moral reasoning",
+        "teaching modules",
+        "algorithmic decision-making",
+        "computer science curriculum",
+        "student feedback"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Teaching and Learning Programming",
+        "Ethics in Business and Education"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Computing Ethics The Ethics Beat",
+      "abstract": "Surveying the increasing variety and nature of ethical challenges encountered by computing researchers and practitioners.",
+      "year": 2010,
+      "venue": "Communications of the ACM",
+      "work_type": "article",
+      "keywords": [
+        "computer ethics",
+        "ethical considerations",
+        "research ethics",
+        "professional responsibility"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Flooding and Environmental Impact",
+        "Ethics in Business and Education"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.18260/1-2--36832",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Computing Ethics for the Ethics of Computing",
+      "abstract": "In an undergraduate computing ethics course, computing analogues can assist in illustrating and grounding some of the content of professional ethics for computer science itself.To introduce students to the standard normative theories, the instructor gives function headings; to show the different ways that these normative theories can be play out in reality, she describes their inheritance mechanism; to motivate gathering of pertinent facts, she invokes the notion of metadata.Care must be taken t",
+      "year": 2021,
+      "venue": "ASEE Annual Conference & Exposition",
+      "work_type": "conference-paper",
+      "keywords": [
+        "computer ethics",
+        "professional ethics",
+        "normative theory",
+        "ethics education",
+        "computer science education",
+        "ethical dilemmas",
+        "undergraduate curriculum",
+        "inheritance mechanism"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Teaching and Learning Programming",
+        "Engineering Education and Curriculum Development"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1108/jices-12-2020-0127",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Perspectives on computing ethics: a multi-stakeholder analysis",
+      "abstract": "Purpose Computing ethics represents a long established, yet rapidly evolving, discipline that grows in complexity and scope on a near-daily basis. Therefore, to help understand some of that scope it is essential to incorporate a range of perspectives, from a range of stakeholders, on current and emerging ethical challenges associated with computer technology. This study aims to achieve this by using, a three-pronged, stakeholder analysis of Computer Science academics, ICT industry professionals,",
+      "year": 2021,
+      "venue": "Journal of Information, Communication and Ethics in Society",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/2871196",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The Ethics of Computing",
+      "abstract": "Computing technologies and artifacts are increasingly integrated into most aspects of our professional, social, and private lives. One consequence of this growing ubiquity of computing is that it can have significant ethical implications that computing professionals need to be aware of. The relationship between ethics and computing has long been discussed. However, this is the first comprehensive survey of the mainstream academic literature of the topic. Based on a detailed qualitative analysis ",
+      "year": 2016,
+      "venue": "ACM Computing Surveys",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3722550",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The Future of Professional Ethics in Computing",
+      "abstract": "A call to action ...",
+      "year": 2025,
+      "venue": "Communications of the ACM",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3625252",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Leveraging Professional Ethics for Responsible AI",
+      "abstract": "Applying AI techniques to journalism.",
+      "year": 2024,
+      "venue": "Communications of the ACM",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.22148/16.036",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Data Is the New What? Popular Metaphors & Professional Ethics in Emerging Data Culture",
+      "abstract": "A growing list of high-profile controversies involving the social impacts of artificial intelligence systems (AI), digital data collection and algorithmic analysis have forced difficult conversations around the ethics of data-intensive digital technologies and so-called \"big data\" research. These incidents are directly relevant to newly coalescing cultures of \"data science,\" an emergent field which seeks both to interpret and capitalize on the creation, collection, and processing of knowledge th",
+      "year": 2019,
+      "venue": "Journal of Cultural Analytics",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/122652.122653",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "ACM code of ethics and professional conduct",
+      "abstract": "",
+      "year": 1991,
+      "venue": "ACM SIGCAS Computers and Society",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/129875.129885",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "ACM code of ethics and professional conduct",
+      "abstract": "",
+      "year": 1992,
+      "venue": "Communications of the ACM",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3017680.3022340",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The ACM Code of Ethics and Professional Conduct",
+      "abstract": "",
+      "year": 2017,
+      "venue": "Proceedings of the 2017 ACM SIGCSE Technical Symposium on Computer Science Education",
+      "work_type": "proceedings-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/95554.95560",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Professional codes of conduct and computer ethics education",
+      "abstract": "Advancements in computer technology over the past twenty years have created ethical dilemmas and raised questions, some similar to other professions and some unique to the computer field. Therefore we think there is a need to reevaluate the application of ethical principles and establish new guidelines on ethical practices for the computer science profession. Because of the questions that have been raised, and in some instances sensational news accounts of computer irregularities, including frau",
+      "year": 1990,
+      "venue": "ACM SIGCAS Computers and Society",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3287324.3287519",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "ACM Code of Ethics",
+      "abstract": "",
+      "year": 2019,
+      "venue": "Proceedings of the 50th ACM Technical Symposium on Computer Science Education",
+      "work_type": "proceedings-article",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1145/317665.317682",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Software engineering code of ethics is approved",
+      "abstract": "",
+      "year": 1999,
+      "venue": "Communications of the ACM",
+      "work_type": "journal-article",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.2139/ssrn.4540163",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "User-based algorithmic auditing",
+      "abstract": "Abstract In the artificial intelligence and cloud computing age, digital platforms like Meta, Google, and Amazon wield immense social, economic, and political power, shaping users’ daily lives. As these platforms gather vast amounts of user data and utilize sophisticated algorithms to personalize services, they also expose users to risks of bias and manipulation. Policymakers are seeking ways to hold platforms accountable, and algorithmic auditing is emerging as a key approach. However, existing",
+      "year": 2025,
+      "venue": "Social Science Research Network",
+      "work_type": "posted-content",
+      "keywords": [
+        "algorithmic auditing",
+        "algorithmic oversight",
+        "algorithmic accountability",
+        "digital platforms",
+        "third-party auditing",
+        "self-auditing",
+        "conflicts of interest",
+        "algorithmic bias"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Digitalization, Law, and Regulation",
+        "Diverse Legal and Medical Studies"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.48550/arxiv.2403.18623",
+      "arxiv_id": "2403.18623",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Antitrust, Amazon, and Algorithmic Auditing",
+      "abstract": "In digital markets, antitrust law and special regulations aim to ensure that markets remain competitive despite the dominating role that digital platforms play today in everyone's life. Unlike traditional markets, market participant behavior is easily observable in these markets. We present a series of empirical investigations into the extent to which Amazon engages in practices that are typically described as self-preferencing. We discuss how the computer science tools used in this paper can be",
+      "year": 2024,
+      "venue": "Journal of Institutional and Theoretical Economics",
+      "work_type": "article",
+      "keywords": [
+        "competition law",
+        "Amazon",
+        "self-preferencing",
+        "algorithmic auditing",
+        "digital platforms",
+        "platform competition",
+        "algorithmic regulation",
+        "digital markets"
+      ],
+      "categories": [
+        "Diverse Legal and Medical Studies",
+        "Digital Platforms and Economics",
+        "Merger and Competition Analysis"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.2139/ssrn.4756637",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Explainable Fairness in Regulatory Algorithmic Auditing",
+      "abstract": "How does a regulator know if an algorithm is compliant with existing anti-discrimination law? This is an urgent question, as algorithmic decision-making tools play an increasingly significant role in the lives of humans, especially at critical junctures such as getting into college, getting a job, getting a mortgage, housing, or insurance. In each of these regulated situations, moreover, the legal meaning of unlawful discrimination is different and context dependent. Regulators lack consensus on",
+      "year": 2024,
+      "venue": "Social Science Research Network",
+      "work_type": "posted-content",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Knowledge Representation for Algorithmic Auditing to Detangle Systemic Bias",
+      "abstract": "",
+      "year": 2021,
+      "venue": "International Symposium on Intelligent Control",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1201/9781003382706-5",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The emergence of algorithmic auditing in the public sector",
+      "abstract": "",
+      "year": 2024,
+      "venue": "Continuous Auditing with AI in the Public Sector",
+      "work_type": "book-chapter",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1145/3531146.3533213",
+      "arxiv_id": "2310.02521",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Who Audits the Auditors? Recommendations from a field scan of the algorithmic auditing ecosystem",
+      "abstract": "Algorithmic audits (or ‘AI audits’) are an increasingly popular mechanism for algorithmic accountability; however, they remain poorly defined. Without a clear understanding of audit practices, let alone widely used standards or regulatory guidance, claims that an AI product or system has been audited, whether by first-, second-, or third-party auditors, are difficult to verify and may potentially exacerbate, rather than mitigate, bias and harm. To address this knowledge gap, we provide the first",
+      "year": 2022,
+      "venue": "ACM Conference on Fairness, Accountability, and Transparency (FAccT)",
+      "work_type": "conference-paper",
+      "keywords": [
+        "algorithmic auditing",
+        "AI audit",
+        "algorithmic accountability",
+        "auditing standards",
+        "independent auditors",
+        "AI regulation",
+        "stakeholder engagement",
+        "audit disclosure"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Explainable Artificial Intelligence (XAI)",
+        "Digitalization, Law, and Regulation"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3465416.3483294",
+      "arxiv_id": "2109.06974",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Algorithmic Auditing and Social Justice: Lessons from the History of Audit Studies",
+      "abstract": "“Algorithmic audits” have been embraced as tools to investigate the functioning and consequences of sociotechnical systems. Though the term is used somewhat loosely in the algorithmic context and encompasses a variety of methods, it maintains a close connection to audit studies in the social sciences—which have, for decades, used experimental methods to measure the prevalence of discrimination across domains like housing and employment. In the social sciences, audit studies originated in a stron",
+      "year": 2021,
+      "venue": "Conference on Equity and Access in Algorithms, Mechanisms, and Optimization",
+      "work_type": "conference-paper",
+      "keywords": [
+        "algorithmic auditing",
+        "audit studies",
+        "social justice",
+        "algorithmic discrimination",
+        "racial equity",
+        "participatory action research",
+        "socio-technical systems",
+        "algorithmic accountability"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Names, Identity, and Discrimination Research",
+        "Feminist Epistemology and Gender Studies",
+        "cs.CY"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1177/2053951720983865",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The algorithm audit: Scoring the algorithms that score us",
+      "abstract": "In recent years, the ethical impact of AI has been increasingly scrutinized, with public scandals emerging over biased outcomes, lack of transparency, and the misuse of data. This has led to a growing mistrust of AI and increased calls for mandated ethical audits of algorithms. Current proposals for ethical assessment of algorithms are either too high level to be put into practice without further guidance, or they focus on very specific and technical notions of fairness or transparency that do n",
+      "year": 2021,
+      "venue": "Big Data & Society",
+      "work_type": "editorial",
+      "keywords": [
+        "algorithmic auditing",
+        "algorithmic ethics",
+        "auditing framework",
+        "stakeholder interests",
+        "algorithmic fairness",
+        "algorithmic transparency",
+        "algorithmic bias",
+        "AI regulation"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Explainable Artificial Intelligence (XAI)",
+        "Digitalization, Law, and Regulation"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1145/3630106.3658959",
+      "arxiv_id": "2402.08101",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Auditing Work: Exploring the New York City algorithmic bias audit regime",
+      "abstract": "In July 2023, New York City (NYC) implemented the first attempt to create an algorithm auditing regime for commercial machine-learning systems. Local Law 144 (LL 144), requires NYC-based employers using automated employment decision-making tools (AEDTs) in hiring to be subject to annual bias audits by an independent auditor. In this paper, we analyse what lessons can be learned from LL 144 for other national attempts to create algorithm auditing regimes. Using qualitative interviews with 17 expe",
+      "year": 2024,
+      "venue": "Conference on Fairness, Accountability and Transparency",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1140/epjds/s13688-024-00454-5",
+      "arxiv_id": "2302.08301",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The right to audit and power asymmetries in algorithm auditing",
+      "abstract": "Abstract In this paper, we engage with and expand on the keynote talk about the “Right to Audit” given by Prof. Christian Sandvig at the International Conference on Computational Social Science 2021 through a critical reflection on power asymmetries in the algorithm auditing field. We elaborate on the challenges and asymmetries mentioned by Sandvig — such as those related to legal issues and the disparity between early-career and senior researchers. We also contribute a discussion of the asymmet",
+      "year": 2024,
+      "venue": "EPJ Data Science",
+      "work_type": "article",
+      "keywords": [
+        "algorithmic auditing",
+        "power imbalance",
+        "data access",
+        "data ownership",
+        "early-career researchers",
+        "Eurocentrism",
+        "diversity in research",
+        "incentive structures"
+      ],
+      "categories": [
+        "Ethics and Social Impacts of AI",
+        "Digitalization, Law, and Regulation",
+        "Explainable Artificial Intelligence (XAI)",
+        "cs.CY"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "CODE OF ETHICS",
+      "abstract": "",
+      "year": 2013,
+      "venue": "",
+      "work_type": "article",
+      "keywords": [],
+      "categories": [
+        "Ethics in Business and Education",
+        "Ethics and bioethics in healthcare",
+        "Flooding and Environmental Impact"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1007/bf00381721",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Codes of ethics",
+      "abstract": "",
+      "year": 1989,
+      "venue": "Journal of Business Ethics",
+      "work_type": "article",
+      "keywords": [
+        "code of ethics",
+        "business ethics",
+        "whistleblowing",
+        "conflicts of interest",
+        "insider information",
+        "commercial bribery",
+        "environmental responsibility",
+        "political action"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Business Law and Ethics",
+        "Governance, Compliance, and Sustainability"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1007/bf00382576",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Corporate codes of ethics",
+      "abstract": "",
+      "year": 1989,
+      "venue": "Journal of Business Ethics",
+      "work_type": "article",
+      "keywords": [
+        "corporate codes of ethics",
+        "codes of conduct",
+        "corporate social responsibility",
+        "business ethics"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Corporate Social Responsibility Reporting",
+        "Corporate Social Responsibility and Sustainability"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1177/09697330241277986",
+      "arxiv_id": "",
+      "pmid": "39322222",
+      "pmcid": "",
+      "title": "Nursing professions' distinctive ethical standards: Exploring a code of ethics.",
+      "abstract": "This article presents an examination of the ethical code of nursing in Israel, focusing on the nurse-patient, nurse-colleague, and nurse-professional leadership relationships. This article offers for the first English translation of the Israel Nursing Association's Code of Ethics to facilitate international scholarly discussion, and to critique this Code through the lens of Asa Kasher's philosophical test, thereby examining its completeness and practical utility. As it stands today, the code lac",
+      "year": 2025,
+      "venue": "Nursing ethics",
+      "work_type": "Journal Article",
+      "keywords": [
+        "Nursing code of ethics",
+        "professionalism"
+      ],
+      "categories": [
+        "Humans",
+        "Codes of Ethics",
+        "Ethics, Nursing",
+        "Israel",
+        "Professionalism",
+        "Nurse-Patient Relations"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1145/3236024.3264833",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Does ACM’s code of ethics change ethical decision making in software development?",
+      "abstract": "Ethical decisions in software development can substantially impact end-users, organizations, and our environment, as is evidenced by recent ethics scandals in the news. Organizations, like the ACM, publish codes of ethics to guide software-related ethical decisions. In fact, the ACM has recently demonstrated renewed interest in its code of ethics and made updates for the first time since 1992. To better understand how the ACM code of ethics changes software-related decisions, we replicated a pri",
+      "year": 2018,
+      "venue": "ESEC/SIGSOFT FSE",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1007/s13347-021-00451-w",
+      "arxiv_id": "2011.03016",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Ethics in the Software Development Process: From Codes of Conduct to Ethical Deliberation",
+      "abstract": "Software systems play an ever more important role in our lives and software engineers and their companies find themselves in a position where they are held responsible for ethical issues that may arise. In this paper, we try to disentangle ethical considerations that can be performed at the level of the software engineer from those that belong in the wider domain of business ethics. The handling of ethical problems that fall into the responsibility of the engineer have traditionally been address",
+      "year": 2020,
+      "venue": "",
+      "work_type": "preprint",
+      "keywords": [],
+      "categories": [
+        "cs.SE"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.1111/inr.70058",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "The Relationship Between Moral Sensitivity, Moral Distress, Perceived Organizational Support, and Self-Esteem in Iranian Nurses: A Cross-Sectional Analytical Study.",
+      "abstract": "AIM This study examined the relationship between moral sensitivity, moral distress, perceived organizational support, and self-esteem among nurses in teaching hospitals affiliated with Zahedan University of Medical Sciences. INTRODUCTION Nurses with moral sensitivity enhance patient rights, moral decision-making, and medical care quality. This fundamental attribute plays a crucial role in fostering patient trust and enhancing the treatment course. METHODS This cross-sectional analytical study in",
+      "year": 2025,
+      "venue": "International Nursing Review",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1109/acseac.2012.9",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Software Engineering Ethical Decision Making and Professional Responsibility",
+      "abstract": "Software systems cut across miscellaneous spheres including medicine, business, warfare and aerospace. And as thus, the actions of software engineers have a non-trivial effect on software users and stakeholders. Therefore, more than ever, software engineers are faced not only with technical adequacy of software but also with the non-technical concerns, primarily, the ethical impact of their decisions through the software development process. With accountability abounding to varied constituents, ",
+      "year": 2012,
+      "venue": "2012 African Conference for Sofware Engineering and Applied Computing",
+      "work_type": "conference-paper",
+      "keywords": [
+        "software ethics",
+        "ethical decision-making",
+        "professional responsibility",
+        "code of ethics",
+        "software developers",
+        "conflicting loyalties",
+        "stakeholder impact"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Flooding and Environmental Impact",
+        "Software Engineering Techniques and Practices"
+      ],
+      "label": "core"
+    },
+    {
+      "doi": "10.48550/arxiv.1810.02685",
+      "arxiv_id": "1810.02685",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Thinging Ethics for Software Engineers",
+      "abstract": "Ethical systems are usually described as principles for distinguishing right from wrong and forming beliefs about proper conduct. Ethical topics are complex, with excessively verbose accounts of mental models and intensely ingrained philosophical assumptions. From practical experience, in teaching ethics for software engineering students, an explanation of ethics alone often cannot provide insights of behavior and thought for students. Additionally, it seems that there has been no exploration in",
+      "year": 2018,
+      "venue": "arXiv (Cornell University)",
+      "work_type": "preprint",
+      "keywords": [
+        "software ethics",
+        "ethical decision-making",
+        "moral theory",
+        "conceptual modeling",
+        "diagrammatic representation",
+        "modeling languages",
+        "UML",
+        "ethics education"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Flooding and Environmental Impact",
+        "Software Engineering Techniques and Practices"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.1109/fie63693.2025.11328128",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "WIP: Teaching Ethical Decision-Making (EDM) in Undergraduate Computer Science and Software Engineering Courses",
+      "abstract": "This work-in-progress innovative practice paper presents our approach to teaching a novel methodology called Ethical Decision-Making (EDM) within undergraduate Computer Science and Software Engineering (CSSE) courses. This EDM is an effort towards building a foundation to help software engineers develop software systems with strong ethical principles, enabling them to actively prevent issues like unfairness and breaches of privacy. We begin by detailing how we have tailored and currently integra",
+      "year": 2025,
+      "venue": "Frontiers in Education Conference",
+      "work_type": "conference-paper",
+      "keywords": [
+        "ethical decision-making",
+        "computer science education",
+        "software engineering education",
+        "machine learning ethics",
+        "undergraduate curriculum",
+        "privacy violations",
+        "instructional module development"
+      ],
+      "categories": [
+        "Information Systems Education and Curriculum Development",
+        "Teaching and Learning Programming",
+        "Engineering Education and Curriculum Development"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.18260/1-2--35768",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "GIFT: The Influence of Stakeholders in Ethical Decision Making",
+      "abstract": "Abstract Students in first-year engineering design courses recognize that the purpose of their design is to solve a problem or meet a need for a new product or process. Therefore, their end user is a major stakeholder for their design. In our design courses, we emphasize that the end user is not the only stakeholder, but that the views of everyone who could be impacted by the new product or process should be addressed by the design and its implementation or manufacture. Stakeholder interests oft",
+      "year": 2024,
+      "venue": "First-Year Engineering Experience Conference (FYEE)",
+      "work_type": "conference-paper",
+      "keywords": [
+        "engineering ethics",
+        "ethical decision-making",
+        "stakeholder analysis",
+        "engineering design education",
+        "first-year engineering design",
+        "deontology",
+        "virtue ethics",
+        "consequentialism"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Engineering Education and Pedagogy",
+        "Engineering Education and Curriculum Development"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.5121/csit.2020.101412",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Moderation Effect of Software Engineers’ Emotional Intelligence (EQ) between their Work Ethics and their Work Performance",
+      "abstract": "In today’s world, software is being used in every sector, be it education, healthcare, security, transportation, finance and so on. As software engineers are affecting society greatly, if they do not behave ethically, it could cause widespread damage, such as the Facebook-Cambridge Analytica scandal in 2018. Therefore, investigating the ethics of software engineers and the relationships it has with other interpersonal variables such as work performance is important for understanding what could b",
+      "year": 2020,
+      "venue": "",
+      "work_type": "conference-paper",
+      "keywords": [
+        "emotional intelligence",
+        "work ethic",
+        "employee performance",
+        "software developers",
+        "moderating effect",
+        "ethical decision-making",
+        "occupational stress",
+        "moral behavior"
+      ],
+      "categories": [
+        "Emotional Intelligence and Performance",
+        "Ethics in Business and Education",
+        "Employee Performance and Leadership"
+      ],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.5753/sbqs.2025.13576",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "May I speak? Perceptions on ethical concerns and power while developing software in AI teams",
+      "abstract": "Context: As Artificial Intelligence (AI) technologies increasingly influence decision-making processes, ethical concerns in AI development have gained significant attention. However, most research in this area focuses on high-level decision-makers or large technology corporations in the Global North, overlooking the lived experiences of software engineers in underrepresented contexts. Goal: This study investigates how Brazilian software engineers working in AI teams at a mid-sized company percei",
+      "year": 2025,
+      "venue": "Brazilian Symposium on Software Quality",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "core"
+    },
+    {
+      "doi": "10.1109/tai.2024.3387403",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Ensuring Ethical Standards in the Development of Autonomous and Intelligent Systems",
+      "abstract": "Considering ethical values, maintaining ethical requirements, and addressing ethical concerns is a crucial aspect of developing systems based on artificial intelligence (AI). Developers need to prioritize ethical considerations throughout the development process, from the initial concept to the final implementation. Despite the issuance of numerous ethical guidelines for technology developers in recent years, research results have shown no significant impact of ethical requirements on the human ",
+      "year": 2024,
+      "venue": "IEEE Transactions on Artificial Intelligence",
+      "work_type": "",
+      "keywords": [],
+      "categories": [],
+      "label": "excluded"
+    },
+    {
+      "doi": "10.64907/xkmf.v5i2.rtw.1",
+      "arxiv_id": "",
+      "pmid": "",
+      "pmcid": "",
+      "title": "Professional Ethics in Computing Education: A Qualitative Inquiry into Students’ Ethical Reasoning Development",
+      "abstract": "The increasing societal impact of computing technologies has intensified the need for robust ethics education within computing disciplines. This study investigates the development of ethical reasoning among students through a qualitative inquiry based on secondary data, including scholarly literature, institutional frameworks, and policy documents. Grounded in Kohlberg’s theory of moral development, Rest’s Four-Component Model, and constructivist learning theory, the research examines how ethica",
+      "year": 2026,
+      "venue": "Review of Teacher’s World",
+      "work_type": "article",
+      "keywords": [
+        "computer ethics",
+        "moral reasoning",
+        "professional ethics education",
+        "moral development",
+        "Kohlberg's stages of moral development",
+        "Rest's four-component model",
+        "case-based learning",
+        "experiential learning"
+      ],
+      "categories": [
+        "Ethics in Business and Education",
+        "Values and Moral Education",
+        "Information Systems Education and Curriculum Development"
+      ],
+      "label": "excluded"
+    }
+  ]
+}

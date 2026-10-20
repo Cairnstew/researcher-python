@@ -78,6 +78,16 @@ research *ARGS:
 web-search *ARGS:
     {{dev}} 'python scripts/web_search.py {{ARGS}}'
 
+# Replay queries against a saved pool and measure gold-set recall per
+# scoring/floor configuration, e.g.
+# `just recall --pool results.json --gold core.json --search-log log.jsonl`.
+recall *ARGS:
+    {{dev}} 'python scripts/benchmark_search.py {{ARGS}}'
+
+# Run the committed recall fixture (fast; same data as the regression test).
+recall-fixture:
+    {{dev}} 'python scripts/benchmark_search.py --fixture tests/fixtures/recall_benchmark.json'
+
 # Search with provenance: appends a round-log row per search (lab03's
 # "record which combination produced what").  e.g.
 #   just search-log research-out/rounds.md "algorithmic bias" --field title

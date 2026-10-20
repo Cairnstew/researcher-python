@@ -52,7 +52,7 @@ Scoring shape, in ``[0.0, 1.0]``:
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable, Sequence
+from collections.abc import Iterable, Mapping, Sequence
 
 from .models import Paper
 
@@ -101,17 +101,18 @@ _PHRASE_BONUS = 0.10
 #: everywhere) means no floor at all.
 DEFAULT_MIN_SCORE: float = 0.20
 
-#: Suggested ``top_ratio`` — the value that separated signal from noise in
-#: practice on a six-term LSEP query (39 merged records -> 31 kept, with every
-#: dropped record being AGI-philosophy or unrelated-topic noise).
+#: Suggested ``top_ratio`` — a starting point, not a safe default.
 #:
-#: **Raising it past ~0.6 starts removing genuine work.**  The same probe at
-#: 0.6 dropped *The Malicious Use of AI* (0.521), which is squarely on topic —
-#: a relative floor cannot tell "marginally relevant" from "topically
-#: irrelevant", so an aggressive ratio trades real recall for a tidy list.
-#: Scores tend to cluster with a gap after the weak tail, so a plateau (0.4
-#: and 0.5 cut the *same* eight records on that query) is the signal that you
-#: have found the natural break rather than cutting into signal.
+#: On a six-term LSEP query it separated signal from noise (39 merged records
+#: -> 31 kept, every dropped record being AGI-philosophy or unrelated-topic
+#: noise).  But the CW1 gold benchmark (22 replayed queries, 103 hand-screened
+#: core papers, a fixed 1,674-record pool; see ``scripts/benchmark_search.py``)
+#: shows the cost on a real workload: ``0.5`` kept 86/103 gold papers and
+#: ``0.6`` kept 76/103, while ``min_score=0.20`` kept 102/103.  A relative
+#: floor cannot tell "marginally relevant" from "topically irrelevant", so it
+#: is a precision lever to measure, not a default to trust.  Scores tend to
+#: cluster with a gap after the weak tail, so a plateau (two ratios cutting the
+#: same set) is the signal that you found the break rather than cutting signal.
 DEFAULT_TOP_RATIO: float = 0.50
 
 _WORD_RE = re.compile(r"[a-z0-9]+")
@@ -171,7 +172,13 @@ def _phrase_in_title(paper: Paper, terms: Sequence[str]) -> bool:
 
 
 def score_paper(
-    paper: Paper, terms: Sequence[str], fields: Sequence[str] | None = None
+    paper: Paper,
+    terms: Sequence[str],
+    fields: Sequence[str] | None = None,
+    *,
+    field_weights: Mapping[str, float] | None = None,
+    phrase_bonus: float | None = None,
+    coverage_weight: float = 0.75,
 ) -> float:
     """Relevance of one record to ``terms``, in ``[0.0, 1.0]``.
 
@@ -187,16 +194,40 @@ def score_paper(
     score`` becomes a no-op, and a relative floor can never cut anything.
     Scoring on the scoped field keeps the distinctions the caller asked for.
 
-    Pure: same record + same terms (+ same fields) -> same value.
+    ``field_weights``, ``phrase_bonus`` and ``coverage_weight`` override the
+    defaults for an experiment (the recall benchmark uses them to compare
+    weighting schemes).  They stay keyword-only and default to the documented
+    values, so production scoring is unchanged.  Unknown field names are
+    ignored rather than becoming silently unweighted evidence.
+
+    Pure: same record + same terms (+ same fields + same overrides) -> same
+    value.
     """
     if not terms:
         return 0.0
+    if not 0.0 <= coverage_weight <= 1.0:
+        raise ValueError(
+            f"coverage_weight must be between 0.0 and 1.0, got {coverage_weight!r}"
+        )
+    if phrase_bonus is not None and phrase_bonus < 0.0:
+        raise ValueError(f"phrase_bonus must be non-negative, got {phrase_bonus!r}")
 
-    weights = FIELD_WEIGHTS if fields is None else {
-        name: weight for name, weight in FIELD_WEIGHTS.items() if name in fields
+    base_weights = dict(FIELD_WEIGHTS)
+    if field_weights is not None:
+        for name, weight in field_weights.items():
+            if name not in FIELD_WEIGHTS:
+                continue
+            if weight < 0.0:
+                raise ValueError(
+                    f"field weight for {name!r} must be non-negative, got {weight!r}"
+                )
+            base_weights[name] = weight
+
+    weights = base_weights if fields is None else {
+        name: weight for name, weight in base_weights.items() if name in fields
     }
     if not weights:
-        weights = FIELD_WEIGHTS
+        weights = base_weights
 
     # Coverage counts *distinct* terms matched; density measures how saturated
     # the text is with them.  Density is a weighted mean of per-field
@@ -233,14 +264,20 @@ def score_paper(
 
     coverage = matched / len(terms)
     density = density_total / density_weight if density_weight else 0.0
-    score = 0.75 * coverage + 0.25 * density
+    score = coverage_weight * coverage + (1.0 - coverage_weight) * density
     if _phrase_in_title(paper, terms):
-        score += _PHRASE_BONUS
+        score += _PHRASE_BONUS if phrase_bonus is None else phrase_bonus
     return max(0.0, min(1.0, round(score, 4)))
 
 
 def score_papers(
-    papers: Iterable[Paper], query: str, fields: Sequence[str] | None = None
+    papers: Iterable[Paper],
+    query: str,
+    fields: Sequence[str] | None = None,
+    *,
+    field_weights: Mapping[str, float] | None = None,
+    phrase_bonus: float | None = None,
+    coverage_weight: float = 0.75,
 ) -> list[Paper]:
     """Stamp ``Paper.relevance`` for each record and return them in order.
 
@@ -256,12 +293,20 @@ def score_papers(
 
     ``fields`` restricts scoring to a subset of fields (see
     :func:`score_paper`); the pipeline passes the search's own field scope
-    through, so a title-scoped search still ranks informatively.
+    through, so a title-scoped search still ranks informatively.  The keyword
+    overrides are forwarded unchanged to :func:`score_paper`.
     """
     terms = query_terms(query)
     items = list(papers)
     for paper in items:
-        paper.relevance = score_paper(paper, terms, fields)
+        paper.relevance = score_paper(
+            paper,
+            terms,
+            fields,
+            field_weights=field_weights,
+            phrase_bonus=phrase_bonus,
+            coverage_weight=coverage_weight,
+        )
     return items
 
 
