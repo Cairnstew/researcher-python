@@ -42,7 +42,15 @@ from ..ids import (
     wire_doi,
 )
 from ..models import Author, Paper
-from .base import Capabilities, Source, parse_retry_after, require_dependency, squash_text
+from .base import (
+    Capabilities,
+    SearchFilters,
+    Source,
+    apply_filters,
+    parse_retry_after,
+    require_dependency,
+    squash_text,
+)
 
 __all__ = ["SemanticScholarSource", "parse_s2_paper", "unwrap_graph_list"]
 
@@ -299,26 +307,46 @@ class SemanticScholarSource(Source):
         raise NotFoundError(self.name, self._hint(text))
 
     def _paper_address(self, paper: Paper) -> str:
+        # The Graph API's own paperId -- kept in ``ids`` -- needs no prefix and
+        # is the most direct address, so prefer it: a record that carries only
+        # an S2 id (no DOI/arXiv/PMID) can then still be followed.
+        stored = paper.id_for("semantic_scholar")
+        if stored:
+            return stored
         for candidate in (paper.doi, paper.arxiv_id, paper.pmid):
             if candidate:
                 return self._address(candidate)
         raise NotFoundError(
-            self.name, f"record has no DOI, arXiv id or PMID: {paper.title!r}"
+            self.name,
+            f"record has no Semantic Scholar id, DOI, arXiv id or PMID: {paper.title!r}",
         )
 
     # -- operations ------------------------------------------------------
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
         self.require_support("search")
         want = self.settings.max_results if limit is None else max(0, int(limit))
         text = (query or "").strip()
         if want == 0 or not text:
             return []
 
+        # Semantic Scholar's /paper/search takes no field scope and no date
+        # range, so both are applied locally.  Because filtering shrinks each
+        # page, the loop keeps paging until it has `want` survivors (or runs
+        # out of offset window) rather than stopping at the first short page.
+        narrowing = filters is not None and filters.active
+
         collected: list[Paper] = []
+        seen: set[tuple[str, str]] = set()
         offset = 0
         while len(collected) < want and offset < _MAX_OFFSET:
-            size = min(_PAGE_SIZE, want - len(collected))
+            size = min(_PAGE_SIZE, want if not narrowing else _PAGE_SIZE)
             payload = self._get(
                 "/paper/search",
                 {"query": text, "limit": size, "offset": offset, "fields": _FIELDS},
@@ -326,7 +354,17 @@ class SemanticScholarSource(Source):
             items = self._data(payload)
             if not items:
                 break
-            collected.extend(parse_s2_paper(item) for item in items)
+            batch = []
+            for item in items:
+                paper = parse_s2_paper(item)
+                # The offset window overlaps between pages; skip what we
+                # already accepted so a narrow filter cannot double-count.
+                fingerprint = (paper.doi, paper.title_key() or "")
+                if fingerprint in seen:
+                    continue
+                seen.add(fingerprint)
+                batch.append(paper)
+            collected.extend(apply_filters(batch, filters, query))
             offset += len(items)
             if len(items) < size:
                 break

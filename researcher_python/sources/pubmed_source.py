@@ -37,7 +37,15 @@ from ..config import Settings
 from ..errors import NotFoundError, RateLimitError, ResearcherError, SourceError
 from ..ids import is_arxiv_id, is_doi, normalize_doi, normalize_orcid, normalize_pmid, wire_doi
 from ..models import Author, Paper
-from .base import Capabilities, Source, parse_retry_after, require_dependency, squash_text
+from .base import (
+    Capabilities,
+    SearchFilters,
+    Source,
+    apply_filters,
+    parse_retry_after,
+    require_dependency,
+    squash_text,
+)
 
 __all__ = ["PubMedSource", "map_entrez_error", "parse_pubmed_article"]
 
@@ -124,14 +132,22 @@ def _abstract(elem: ET.Element) -> str:
 
 
 def _authors(elem: ET.Element) -> list[Author]:
-    """``LastName + ForeName``; a ``CollectiveName``-only entry becomes one Author."""
+    """``"LastName, ForeName"``; a ``CollectiveName``-only entry becomes one Author.
+
+    The comma is load-bearing, not cosmetic.  PubMed's XML is structured
+    (``LastName`` + ``ForeName``/``Initials``), so the join must mark which part
+    is the family name: flattening it to ``"LastName ForeName"`` makes the
+    Harvard/BibTeX family-name heuristic — which takes the *last* token when it
+    sees no comma — pick up a trailing initial, rendering
+    ``"Tractenberg Rochelle E"`` as ``E, T.R.`` in a reference list.
+    """
     authors: list[Author] = []
     for node in elem.findall("./MedlineCitation/Article/AuthorList/Author"):
         last = _text(node.find("./LastName"))
         fore = _text(node.find("./ForeName")) or _text(node.find("./Initials"))
         collective = _text(node.find("./CollectiveName"))
         if last and fore:
-            name = f"{last} {fore}"
+            name = f"{last}, {fore}"
         elif last:
             name = last
         elif collective:
@@ -393,13 +409,29 @@ class PubMedSource(Source):
 
     # -- operations ------------------------------------------------------
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
         self.require_support("search")
         want = self.settings.max_results if limit is None else max(0, int(limit))
         text = (query or "").strip()
         if want == 0 or not text:
             return []
-        return self._efetch(self._esearch(text, want))
+
+        term = text
+        if filters is not None and filters.field != "any":
+            term = f"{text}[{'ti' if filters.field == 'title' else 'ab'}]"
+        if filters is not None and (filters.year_from or filters.year_to):
+            low = f"{filters.year_from:04d}" if filters.year_from else "1800"
+            high = f"{filters.year_to:04d}" if filters.year_to else "3000"
+            term = f"({term}) AND {low}:{high}[dp]"
+
+        papers = self._efetch(self._esearch(term, want))
+        return apply_filters(papers, filters, query)[:want]
 
     def get(self, key: str) -> Paper:
         self.require_support("get")

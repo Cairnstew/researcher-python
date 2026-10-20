@@ -163,6 +163,36 @@ def normalize_title(value: str | None) -> str:
     return " ".join(text.split())
 
 
+def normalize_isbn(value: str | None) -> str:
+    """Return a bare ISBN-10 or ISBN-13 (hyphens/spaces stripped), or ``""``.
+
+    Books are cited by ISBN, not DOI, so the two recommended Week-4 titles
+    (Kizza 2023, Baase 2012) are unreachable without this.  Both lengths are
+    accepted and the result keeps its own length, so an ISBN-10 stays an
+    ISBN-10 — no silent reformatting of the caller's identifier.
+
+    Only the character grammar is checked, not the check digit: an ISBN pasted
+    out of a PDF with a scanning typo should still be searchable, and every
+    downstream lookup treats it as opaque text.
+    """
+    if not value:
+        return ""
+    text = str(value).strip().upper()
+    if ":" in text and text.rsplit(":", 1)[0].upper() in {"ISBN", "ISBN-10", "ISBN-13"}:
+        text = text.rsplit(":", 1)[1]
+    digits = re.sub(r"[^0-9Xx]", "", text)
+    if len(digits) == 10 and re.fullmatch(r"\d{9}[\dX]", digits):
+        return digits
+    if len(digits) == 13 and digits.isdigit():
+        return digits
+    return ""
+
+
+def is_isbn(value: str | None) -> bool:
+    """True when ``value`` normalises to an ISBN-10 or ISBN-13."""
+    return bool(normalize_isbn(value))
+
+
 def normalize_orcid(value: str | None) -> str:
     """Return a bare ORCID (``0000-0002-1825-0097``) or ``""``."""
     if not value:
@@ -203,9 +233,11 @@ def year_from_date(value: str | None) -> int | None:
 __all__ = [
     "is_arxiv_id",
     "is_doi",
+    "is_isbn",
     "is_pmid",
     "normalize_arxiv_id",
     "normalize_doi",
+    "normalize_isbn",
     "normalize_orcid",
     "normalize_pmid",
     "normalize_title",

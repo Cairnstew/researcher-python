@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import abc
 import importlib
+import re
 import threading
 import time
 from dataclasses import dataclass
@@ -32,7 +33,11 @@ from ..models import Paper
 __all__ = [
     "Capabilities",
     "RateGate",
+    "SEARCH_FIELDS",
+    "SearchFilters",
     "Source",
+    "apply_filters",
+    "matches_filters",
     "parse_retry_after",
     "require_dependency",
     "squash_text",
@@ -54,6 +59,108 @@ def squash_text(value: object) -> str:
     if not isinstance(value, str):
         value = str(value)
     return " ".join(value.split())
+
+
+#: Which part of a record a query is allowed to match.  ``any`` is the
+#: default free-text behaviour; ``title``/``abstract`` are what a systematic
+#: review actually needs ("title only" is how you exclude a passing mention).
+SEARCH_FIELDS = ("any", "title", "abstract")
+
+
+@dataclass(frozen=True, slots=True)
+class SearchFilters:
+    """Narrowing applied on top of a query: publication window + field scope.
+
+    Every source takes the same optional ``filters=`` argument, so a caller
+    does not learn five different spellings of "between 2019 and 2024".
+
+    ``year_from``/``year_to`` are inclusive.  ``year_to`` may also be the
+    string ``"now"``, which means the current year — the natural reading of
+    ``--to now`` and one the shell does not have to compute.
+
+    Adapters pass what their API supports down to the server and filter the
+    rest locally (see :func:`matches_filters`).  A record whose year is
+    unknown is **kept** by a year filter: dropping it would silently hide the
+    very grey literature that has no date, so it is the caller's job to see
+    and exclude it.
+    """
+
+    year_from: int | None = None
+    year_to: int | None = None
+    field: str = "any"
+
+    def __post_init__(self) -> None:
+        if self.field not in SEARCH_FIELDS:
+            raise ValueError(
+                f"unknown search field {self.field!r}; expected one of "
+                f"{', '.join(SEARCH_FIELDS)}"
+            )
+        for name in ("year_from", "year_to"):
+            value = getattr(self, name)
+            if value is not None:
+                if not isinstance(value, int) or isinstance(value, bool):
+                    raise ValueError(f"{name} must be an int or None, got {value!r}")
+                if not 1000 <= value <= 2999:
+                    raise ValueError(f"{name} {value} is not a plausible year")
+
+    @property
+    def active(self) -> bool:
+        """True when this filter would actually remove something."""
+        return self.field != "any" or self.year_from is not None or self.year_to is not None
+
+    def year_ok(self, year: int | None) -> bool:
+        """Whether a record's ``year`` falls inside the window (unknown passes)."""
+        if year is None:
+            return True
+        if self.year_from is not None and year < self.year_from:
+            return False
+        if self.year_to is not None and year > self.year_to:
+            return False
+        return True
+
+
+def _query_terms(query: str) -> list[str]:
+    """Split a free-text query into the terms a field filter must all contain.
+
+    Boolean operators and the field prefixes an adapter may have added are
+    stripped first, so ``ti:(agents AND society)`` filters on ``agents`` and
+    ``society`` rather than on the punctuation the API needed.
+    """
+    text = re.sub(r"\b(?:ti|abs|au|all):", " ", query or "", flags=re.IGNORECASE)
+    text = re.sub(r"[()\"]", " ", text)
+    stop = {"and", "or", "not", "the", "of", "in", "for", "a", "an"}
+    return [t for t in re.findall(r"[\w'-]+", text.lower()) if t not in stop]
+
+
+def matches_filters(
+    paper: Paper, filters: SearchFilters | None, query: str = ""
+) -> bool:
+    """Whether ``paper`` survives ``filters``, judged on the parsed record.
+
+    ``query`` is needed only for a field filter: every term it contains must
+    appear in the chosen field, which is how a source that cannot push the
+    scope down to its API approximates one.
+    """
+    if filters is None or not filters.active:
+        return True
+    if not filters.year_ok(paper.year):
+        return False
+    if filters.field == "any":
+        return True
+    haystack = (
+        paper.title if filters.field == "title" else paper.abstract
+    ).lower()
+    terms = _query_terms(query)
+    return all(term in haystack for term in terms)
+
+
+def apply_filters(
+    papers: list[Paper], filters: SearchFilters | None, query: str = ""
+) -> list[Paper]:
+    """Drop the records ``filters`` exclude, preserving order."""
+    if filters is None or not filters.active:
+        return papers
+    return [p for p in papers if matches_filters(p, filters, query)]
 
 
 @dataclass(frozen=True, slots=True)
@@ -181,8 +288,20 @@ class Source(abc.ABC):
     # -- required operations --------------------------------------------
 
     @abc.abstractmethod
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
-        """Return up to ``limit`` papers matching ``query``, best first."""
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
+        """Return up to ``limit`` papers matching ``query``, best first.
+
+        ``filters`` narrows by publication year and field scope.  An adapter
+        pushes down whatever its API supports and applies the remainder
+        locally with :func:`apply_filters`, so the contract is identical across
+        sources even where the API is not.
+        """
 
     @abc.abstractmethod
     def get(self, key: str) -> Paper:

@@ -1,0 +1,52 @@
+{
+  "kind": "Listing",
+  "data": {
+    "modhash": "",
+    "dist": 2,
+    "children": [
+      {
+        "kind": "t3",
+        "data": {
+          "id": "abc123",
+          "name": "t3_abc123",
+          "title": "How do I merge two dictionaries in Python?",
+          "selftext": "I have two dicts, a and b. What is the cleanest way to merge them?",
+          "author": "some_pythonista",
+          "score": 847,
+          "created_utc": 1689876543,
+          "permalink": "/r/learnpython/comments/abc123/how_do_i_merge_two_dictionaries_in_python/",
+          "url": "https://www.reddit.com/r/learnpython/comments/abc123/how_do_i_merge_two_dictionaries_in_python/",
+          "subreddit": "learnpython",
+          "link_flair_text": "Resource",
+          "num_comments": 63,
+          "upvote_ratio": 0.97,
+          "is_self": true,
+          "over_18": false,
+          "domain": "self.learnpython"
+        }
+      },
+      {
+        "kind": "t3",
+        "data": {
+          "id": "def456",
+          "name": "t3_def456",
+          "title": "pep 448: dict merging operator |",
+          "selftext": "",
+          "author": "pep_fan",
+          "score": 321,
+          "created_utc": 1690000000,
+          "permalink": "/r/Python/comments/def456/pep_448_dict_merging_operator/",
+          "url": "https://docs.python.org/3/whatsnew/3.9.html",
+          "subreddit": "Python",
+          "num_comments": 12,
+          "upvote_ratio": 0.9,
+          "is_self": false,
+          "over_18": false,
+          "domain": "docs.python.org"
+        }
+      }
+    ],
+    "after": "t3_xyz789",
+    "before": null
+  }
+}

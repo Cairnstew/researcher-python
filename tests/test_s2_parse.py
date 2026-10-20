@@ -382,7 +382,22 @@ def test_default_interval_is_one_second_class_for_both_tiers() -> None:
 def test_references_without_an_addressable_id_refuses_before_fetching() -> None:
     with pytest.raises(NotFoundError) as excinfo:
         make_source().references(Paper(title="orphan"))
-    assert "no DOI, arXiv id or PMID" in str(excinfo.value)
+    assert "no Semantic Scholar id, DOI, arXiv id or PMID" in str(excinfo.value)
+
+
+def test_references_use_the_stored_semantic_scholar_id(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A record carrying only ids['semantic_scholar'] must still resolve."""
+    source = make_source()
+    seen: list[dict[str, Any]] = []
+    stub_get(monkeypatch, source, FakeResponse(200, payload=load("s2_references.json")), seen)
+
+    paper = Paper(title="Only an S2 id", ids={"semantic_scholar": "abc123def456"})
+    papers = source.references(paper)
+
+    assert seen and seen[0]["url"].endswith("/paper/abc123def456/references")
+    assert len(papers) == 2  # the null citedPaper row is dropped
 
 
 def test_429_with_garbage_retry_after_maps_to_none(

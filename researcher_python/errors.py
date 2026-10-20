@@ -89,6 +89,22 @@ class ExportError(ResearcherError):
             self.__cause__ = cause
 
 
+class WorkspaceError(ResearcherError):
+    """A workspace is missing, corrupt, or cannot be written.
+
+    Raised by :mod:`researcher_python.workspace` when its files disagree or a
+    result set cannot be persisted.  It is deliberately distinct from
+    :class:`ExportError`: an export failure is about one format, a workspace
+    failure means the provenance store itself is not trustworthy.
+    """
+
+    def __init__(self, message: str = "", *, cause: BaseException | None = None) -> None:
+        self.cause = cause
+        super().__init__(message or "workspace operation failed")
+        if cause is not None:
+            self.__cause__ = cause
+
+
 class DownloadError(ResearcherError):
     """A PDF (or other artifact) could not be fetched or written."""
 
@@ -108,4 +124,5 @@ __all__ = [
     "SourceError",
     "SourceUnavailableError",
     "UnsupportedOperation",
+    "WorkspaceError",
 ]

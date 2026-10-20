@@ -103,7 +103,9 @@ class ReadySource(Source):
         search=True, get=True, references=True, citations=True, pdf=True
     )
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         return []
 
     def get(self, key: str) -> Paper:
@@ -118,7 +120,9 @@ class NeedsConfigSource(Source):
             "setting 'email' is required; export RESEARCHER_EMAIL first"
         )
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         return []
 
     def get(self, key: str) -> Paper:
@@ -133,7 +137,9 @@ class UnavailableSource(Source):
             "unavailable", "dependency 'nope' is not installed"
         )
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         return []
 
     def get(self, key: str) -> Paper:
@@ -407,7 +413,9 @@ class FakeSource(Source):
         out.sources = [self.name]
         return out
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         spec = self._spec
         error = spec.get("search_error")
         if error is not None:
@@ -799,3 +807,297 @@ def test_download_missing_unpaywall_email_exits_two_immediately(
     assert "RESEARCHER_EMAIL" in captured.err
     assert captured.out == ""  # stopped before downloading anything
     assert "10.1/second" not in captured.err
+
+
+# -- relevance scoring on the CLI ---------------------------------------------
+
+
+def test_search_records_the_relevance_floor_in_meta(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(
+                title="Legal liability for artificial intelligence in transport",
+                doi="10.1/on",
+                abstract="Liability and regulation of artificial intelligence.",
+            ),
+            make_paper(
+                title="Global burden of cardiovascular disease", doi="10.1/off"
+            ),
+        ]
+    }
+
+    code = main(
+        ["search", "legal liability", "--source", "alpha",
+         "--format", "json", "--min-score", "0.3"]
+    )
+    captured = capsys.readouterr()
+    payload = json.loads(captured.out)
+
+    assert code == 0
+    assert payload["meta"]["min_score"] == 0.3
+    assert payload["meta"]["terms"] == ["legal", "liability"]
+    assert payload["meta"]["dropped"] == 1
+    # The off-topic hit is gone; the on-topic one survives with its score.
+    assert payload["count"] == 1
+    assert payload["papers"][0]["doi"] == "10.1/on"
+    assert payload["papers"][0]["relevance"] > 0
+    # A filtered set must say it was filtered.
+    assert "dropped 1 record" in captured.err
+
+
+def test_search_scores_every_record_even_without_a_floor(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [make_paper(title="Unrelated cardiology", doi="10.1/off")]
+    }
+    main(["search", "legal liability", "--source", "alpha", "--format", "json"])
+    payload = json.loads(capsys.readouterr().out)
+    assert payload["meta"]["dropped"] == 0
+    # Nothing matches the query, but the record is still scored rather than None.
+    assert payload["papers"][0]["relevance"] == 0.0
+
+
+def test_search_sort_score_orders_by_relevance(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(title="Unrelated cardiology", doi="10.1/off"),
+            make_paper(
+                title="Legal liability for artificial intelligence",
+                doi="10.1/on",
+                abstract="Liability regulation for artificial intelligence.",
+            ),
+        ]
+    }
+    main(
+        ["search", "legal liability", "--source", "alpha", "--sort", "score",
+         "--format", "json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+    assert [p["doi"] for p in payload["papers"]] == ["10.1/on", "10.1/off"]
+
+
+def test_search_rejects_an_out_of_range_min_score(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="x", doi="10.1/x")]}
+    assert main(["search", "q", "--source", "alpha", "--min-score", "5"]) == 2
+    assert "min_score" in capsys.readouterr().err
+
+
+# -- search provenance log ----------------------------------------------------
+
+
+def test_search_log_creates_a_table_and_appends_rows(
+    world: None, tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="One", doi="10.1/1")]}
+    log = tmp_path / "rounds.md"
+
+    assert main(["search", "q", "--source", "alpha", "--search-log", str(log)]) == 0
+    text = log.read_text()
+    assert text.startswith("| when | query | field | sources |")
+    assert "alpha" in text
+    assert "appended to search log" in capsys.readouterr().err
+
+    # A second search appends rather than replacing the header.
+    main(["search", "q2", "--source", "alpha", "--search-log", str(log)])
+    lines = [ln for ln in log.read_text().splitlines() if ln.startswith("| 20")]
+    assert len(lines) == 2
+    assert "q2" in log.read_text()
+
+
+def test_search_log_records_the_scope_and_terms(
+    world: None, tmp_path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="AI Regulation", doi="10.1/1")]}
+    log = tmp_path / "rounds.md"
+    main(["search", "AI regulation", "--source", "alpha", "--field", "title",
+          "--top-ratio", "0.5", "--search-log", str(log)])
+    text = log.read_text()
+    assert "| title |" in text
+    assert "ai; regulation" in text
+
+
+def test_search_hint_is_printed_on_an_empty_scoped_result(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {"search_results": []}
+    main(["search", "blockchain quantum surveillance", "--source", "alpha",
+          "--field", "title"])
+    err = capsys.readouterr().err
+    # Nothing retrieved at all is a source question, not a query one; the CLI
+    # still reports the run without inventing a query hint.
+    assert "0 papers" in err
+
+
+def test_min_citations_flag_is_accepted(world: None, capsys) -> None:
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="x", doi="10.1/x")]}
+    assert main(["search", "q", "--source", "alpha", "--min-citations", "5"]) == 0
+
+
+# -- workspace-backed CLI ----------------------------------------------------
+
+
+def test_search_workspace_persists_and_reports_new_seen(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from researcher_python.workspace import Workspace
+
+    ws_path = tmp_path / "ws"
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="One", doi="10.1/1")]}
+
+    assert main(["search", "q", "--source", "alpha", "--workspace", str(ws_path)]) == 0
+    err = capsys.readouterr().err
+    assert "1 new, 0 already seen" in err
+    assert "logged" in err
+
+    workspace = Workspace(ws_path, settings=Settings(), create=False)
+    assert len(workspace.papers) == 1
+    assert (ws_path / "search-log.jsonl").is_file()
+    assert (ws_path / "workspace.json").is_file()
+
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(title="One revised", doi="10.1/1", abstract="new"),
+            make_paper(title="Two", doi="10.1/2"),
+        ]
+    }
+    assert main(["search", "q2", "--source", "alpha", "--workspace", str(ws_path)]) == 0
+    err = capsys.readouterr().err
+    assert "1 new, 1 already seen" in err
+    workspace.reload()
+    assert len(workspace.papers) == 2
+
+
+def test_workspace_and_search_log_together_is_a_usage_error(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    code = main(
+        [
+            "search",
+            "q",
+            "--source",
+            "alpha",
+            "--workspace",
+            str(tmp_path / "ws"),
+            "--search-log",
+            str(tmp_path / "log.md"),
+        ]
+    )
+    assert code == 2
+    assert "owns its own search log" in capsys.readouterr().err
+    assert not (tmp_path / "ws").exists()
+
+
+def test_workspace_status_json_and_round_advance(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ws_path = str(tmp_path / "ws")
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="One", doi="10.1/1")]}
+    assert main(["search", "q", "--source", "alpha", "--workspace", ws_path]) == 0
+    capsys.readouterr()
+
+    assert main(["workspace", "status", ws_path, "--format", "json"]) == 0
+    status = json.loads(capsys.readouterr().out)
+    assert status["exists"] is True
+    assert status["counts"]["records"] == 1
+
+    assert main(["workspace", "round", ws_path, "--next", "--label", "deeper"]) == 0
+    assert "round 2" in capsys.readouterr().out
+    assert main(["workspace", "round", ws_path, "--set", "5"]) == 0
+    assert "round 5" in capsys.readouterr().out
+
+
+def test_workspace_log_prints_a_well_formed_table(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ws_path = str(tmp_path / "ws")
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="One", doi="10.1/1")]}
+    assert main(["search", "q", "--source", "alpha", "--workspace", ws_path]) == 0
+    capsys.readouterr()
+
+    assert main(["workspace", "log", ws_path]) == 0
+    lines = [line for line in capsys.readouterr().out.splitlines() if line.startswith("|")]
+    header, rule, row = lines
+    assert len(header.strip().strip("|").split("|")) == len(
+        row.strip().strip("|").split("|")
+    )
+
+
+def test_workspace_import_dry_run_reports_the_gap(
+    tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from researcher_python import export
+
+    results = tmp_path / "legacy.json"
+    export.to_json([make_paper(doi=f"10.1/{i}", title=str(i)) for i in range(6)], results)
+    log = tmp_path / "legacy-log.md"
+    log.write_text(
+        "| when | query | field | sources | kept | dropped | terms |\n"
+        "| --- | --- | --- | --- | --- | --- | --- |\n"
+        "| 2026-10-20 14:08 | q `field=any` | alpha | 4 | 0 | q |\n"
+    )
+
+    code = main(
+        [
+            "workspace",
+            "import",
+            str(tmp_path / "ws"),
+            "--results",
+            str(results),
+            "--log",
+            str(log),
+            "--round",
+            "3",
+            "--dry-run",
+        ]
+    )
+    assert code == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["records"] == 6
+    assert report["logged_kept"] == 4
+    assert report["unaccounted"] == 2
+    assert not (tmp_path / "ws").exists()
+
+
+def test_label_workspace_writes_through_the_store(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from researcher_python.workspace import Workspace
+
+    ws_path = str(tmp_path / "ws")
+    BEHAVIOUR["alpha"] = {"search_results": [make_paper(title="One", doi="10.1/1")]}
+    assert main(["search", "q", "--source", "alpha", "--workspace", ws_path]) == 0
+    capsys.readouterr()
+
+    assert main(["label", "--workspace", ws_path, "--set", "core"]) == 0
+    workspace = Workspace(ws_path, settings=Settings(), create=False)
+    assert workspace.papers[0].triage_label() == "core"
+    assert "core" in capsys.readouterr().out
+
+
+def test_label_requires_exactly_one_input(tmp_path: Path, capsys) -> None:
+    assert main(["label", "--set", "core"]) == 2
+    assert "exactly one" in capsys.readouterr().err
+
+
+def test_matrix_and_bibliography_read_a_workspace(
+    world: None, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    ws_path = str(tmp_path / "ws")
+    BEHAVIOUR["alpha"] = {
+        "search_results": [make_paper(title="One", doi="10.1/1", year=2020)]
+    }
+    assert main(["search", "q", "--source", "alpha", "--workspace", ws_path]) == 0
+    capsys.readouterr()
+
+    assert main(["matrix", "--workspace", ws_path]) == 0
+    assert "key,label" in capsys.readouterr().out
+
+    assert main(["bibliography", "--workspace", ws_path]) == 0
+    assert "10.1/1" in capsys.readouterr().out

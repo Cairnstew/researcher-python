@@ -1,0 +1,48 @@
+{
+  "items": [
+    {
+      "tags": ["python", "dictionary", "merge"],
+      "owner": {
+        "account_id": 147773,
+        "reputation": 9780,
+        "user_id": 359120,
+        "user_type": "registered",
+        "accept_rate": 82,
+        "display_name": "Salil",
+        "link": "https://stackoverflow.com/users/359120/salil"
+      },
+      "is_answered": true,
+      "view_count": 313650,
+      "answer_count": 13,
+      "score": 165,
+      "last_activity_date": 1589039100,
+      "creation_date": 1305010204,
+      "question_id": 5946236,
+      "link": "https://stackoverflow.com/questions/5946236/how-to-merge-dicts-collecting-values-from-matching-keys",
+      "title": "How to merge dicts, collecting values from matching keys?"
+    },
+    {
+      "tags": ["python", "dictionary", "merge"],
+      "owner": {
+        "account_id": 18535759,
+        "reputation": 43,
+        "user_id": 13505463,
+        "user_type": "registered",
+        "display_name": "Herpes Qwe",
+        "link": "https://stackoverflow.com/users/13505463/herpes-qwe"
+      },
+      "is_answered": true,
+      "view_count": 73,
+      "answer_count": 1,
+      "score": 1,
+      "last_activity_date": 1589039100,
+      "creation_date": 1589039100,
+      "question_id": 61699463,
+      "link": "https://stackoverflow.com/questions/61699463/how-to-merge-dicts",
+      "title": "How to merge dicts?"
+    }
+  ],
+  "has_more": true,
+  "quota_max": 300,
+  "quota_remaining": 299
+}

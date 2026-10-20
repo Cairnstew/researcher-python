@@ -55,7 +55,9 @@ class FakeSource(Source):
         out.sources = [self.name]
         return out
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         CALLS.append(f"search:{self.name}")
         spec = self._spec
         error = spec.get("search_error")

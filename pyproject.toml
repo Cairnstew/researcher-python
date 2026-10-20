@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "researcher-python"
 version = "0.1.0"
-description = "Unified scholarly search: one pipeline across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed."
+description = "Unified scholarly research pipeline: search, screen, cite and read across arXiv, OpenAlex, Semantic Scholar, Crossref, PubMed, ACM DL and OpenAIRE."
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -19,10 +19,19 @@ dependencies = [
 
 [project.scripts]
 researcher-python = "researcher_python.cli:main"
+researcher-python-mcp = "researcher_python.mcp_server:main"
 
 [project.optional-dependencies]
 dev = [
     "pytest>=8",
+]
+mcp = [
+    "mcp>=1.9",
+]
+# PDF text extraction.  Optional: the whole package works without it, and only
+# `extract` / the `extract_text` + `find_quotes` tools need it.
+pdf = [
+    "pypdf>=5",
 ]
 
 [tool.setuptools.packages.find]

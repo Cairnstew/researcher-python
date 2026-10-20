@@ -32,7 +32,24 @@ from ..config import Settings, load_settings
 from ..errors import ConfigurationError, ResearcherError
 from ..logging_config import setup_logging
 from ..models import SORT_MODES
-from .commands import cmd_download, cmd_get, cmd_info, cmd_search, cmd_sources
+from ..sources.base import SEARCH_FIELDS
+from .commands import (
+    cmd_bibliography,
+    cmd_citations,
+    cmd_download,
+    cmd_extract,
+    cmd_get,
+    cmd_info,
+    cmd_label,
+    cmd_matrix,
+    cmd_references,
+    cmd_search,
+    cmd_sources,
+    cmd_synthesis,
+    cmd_summary,
+    cmd_web_search,
+    cmd_workspace,
+)
 
 __all__ = ["build_parser", "main"]
 
@@ -97,15 +114,49 @@ def build_parser() -> argparse.ArgumentParser:
     )
     search.add_argument(
         "--format",
-        choices=("table", "json", "jsonl"),
+        choices=_CITE_FORMATS,
         default="table",
-        help="output format",
+        help="output format (harvard/bibtex/ris/csl render the result as references)",
+    )
+    search.add_argument("--from", dest="year_from", type=int, default=None, metavar="YEAR",
+                        help="only works published in YEAR or later")
+    search.add_argument("--to", dest="year_to", type=int, default=None, metavar="YEAR",
+                        help="only works published in YEAR or earlier")
+    search.add_argument("--field", choices=SEARCH_FIELDS, default="any",
+                        help="restrict matching to a field (default: any)")
+    search.add_argument("--min-score", dest="min_score", type=float, default=None,
+                        metavar="F", help="drop merged records scoring below F (0.0-1.0); "
+                        "the local relevance score from researcher_python.relevance "
+                        "(default: no floor)")
+    search.add_argument("--min-citations", dest="min_citations", type=int, default=None,
+                        metavar="N", help="drop records with fewer than N citations "
+                        "(unknown counts are kept); a crude standing proxy — see the "
+                        "matrix's citations_per_year column for the age-normalised view")
+    search.add_argument("--top-ratio", dest="top_ratio", type=float, default=None,
+                        metavar="R", help="keep records scoring at least R x the "
+                        "best score (0.0<R<=1.0); scale-free, so unlike --min-score "
+                        "it cuts the tail however long the query is")
+    search.add_argument("--accessed", default="", metavar="DATE",
+                        help="access date used in harvard 'Available at' links")
+    search.add_argument(
+        "--search-log",
+        dest="search_log",
+        metavar="FILE",
+        default=None,
+        help="append a provenance row (query, scope, sources, counts, terms) "
+        "to this Markdown table — the round log the module's lab asks for; "
+        "created with a header if absent",
     )
     search.add_argument(
         "--out",
         metavar="FILE",
         default=None,
         help="write JSON/JSONL to FILE instead of stdout",
+    )
+    _add_workspace_flag(
+        search,
+        "persist this search into DIR (results.json + search log + meta); "
+        "dedupes against prior rounds and reports new/seen/screened",
     )
 
     get = sub.add_parser("get", help="fetch one record by identifier")
@@ -135,16 +186,271 @@ def build_parser() -> argparse.ArgumentParser:
         "--source", dest="source", metavar="NAME", default=None, help="use only this source"
     )
 
+    label = sub.add_parser(
+        "label", help="set screening labels / notes on a saved result set"
+    )
+    label.add_argument(
+        "from_file", nargs="?", metavar="FILE", help="a saved .json result set"
+    )
+    _add_workspace_flag(
+        label, "label the canonical set in DIR instead of a standalone file"
+    )
+    label.add_argument("--set", dest="set", default=None,
+                       choices=("unreviewed", "core", "general", "excluded"),
+                       help="screening label to apply")
+    label.add_argument("--reason", default="", metavar="TEXT",
+                       help="why (kept only with --set excluded)")
+    label.add_argument("--note", default="", metavar="TEXT", help="append a dated note")
+    label.add_argument("--id", action="append", default=None, metavar="ID",
+                       help="only this record (repeatable; default: all)")
+    label.add_argument("--out", metavar="FILE", default=None,
+                       help="write elsewhere (default: rewrite in place)")
+
+    _add_citation_parsers(sub)
+    _add_bibliography_parser(sub)
+    _add_matrix_parsers(sub)
+    _add_web_search_parser(sub)
+    _add_extract_parser(sub)
+    _add_workspace_parser(sub)
+
     return parser
+
+
+# ---------------------------------------------------------------------- #
+# Parser helpers
+# ---------------------------------------------------------------------- #
+
+#: Formats that render a citation list, and ``table`` as the terminal view.
+_CITE_FORMATS = ("table", "json", "jsonl", "harvard", "bibtex", "ris", "csl")
+
+#: Formats that render a *bibliographic reference list* (no table/JSONL views).
+_BIB_FORMATS = ("harvard", "bibtex", "ris", "csl")
+
+
+def _citation_parser(sub, name: str, help_text: str) -> argparse.ArgumentParser:
+    """One of the two symmetric citation subcommands."""
+    parser = sub.add_parser(name, help=help_text)
+    parser.add_argument("identifier", help="DOI, arXiv id, PMID or ISBN")
+    parser.add_argument(
+        "--source",
+        action="append",
+        dest="sources",
+        metavar="NAME",
+        default=None,
+        help="source to query (repeatable; default: every capable source)",
+    )
+    parser.add_argument("--get-source", dest="get_source", metavar="NAME", default=None,
+                        help="resolve the subject record with only this source")
+    parser.add_argument("--max", type=int, default=None, metavar="N",
+                        help="per-source cap (default: settings.max_results)")
+    parser.add_argument("--order", default="canonical",
+                        choices=("canonical", "year", "citations", "title"),
+                        help="result order (default: canonical)")
+    parser.add_argument("--strict", action="store_true",
+                        help="fail if any requested source fails")
+    parser.add_argument("--format", choices=_CITE_FORMATS, default="table",
+                        help="output format (default: table)")
+    parser.add_argument("--accessed", default="", metavar="DATE",
+                        help="access date used in harvard 'Available at' links")
+    parser.add_argument("--out", metavar="FILE", default=None,
+                        help="write to FILE instead of stdout")
+    return parser
+
+
+def _add_citation_parsers(sub) -> None:
+    _citation_parser(sub, "references", "list the works a paper cites")
+    _citation_parser(sub, "citations", "list the works that cite a paper")
+
+
+def _add_workspace_flag(parser, help_text: str) -> None:
+    """Add the shared ``--workspace DIR`` flag to a subcommand."""
+    parser.add_argument(
+        "--workspace",
+        dest="workspace",
+        metavar="DIR",
+        default=None,
+        help=help_text,
+    )
+
+
+def _add_bibliography_parser(sub) -> None:
+    parser = sub.add_parser(
+        "bibliography",
+        help="render a reference list from ids, a query, or a saved result file",
+    )
+    parser.add_argument("identifiers", nargs="*", metavar="IDENTIFIER",
+                        help="DOI, arXiv id, PMID or ISBN")
+    parser.add_argument("--query", default=None, metavar="TEXT",
+                        help="search for these instead of resolving identifiers")
+    parser.add_argument("--from-file", dest="from_file", metavar="FILE", default=None,
+                        help="read a saved .json/.jsonl result set (reproducible)")
+    parser.add_argument("--source", action="append", dest="sources", metavar="NAME",
+                        default=None, help="source for --query (repeatable)")
+    parser.add_argument("--get-source", dest="get_source", metavar="NAME", default=None,
+                        help="resolve identifiers with only this source")
+    parser.add_argument("--max", type=int, default=None, metavar="N",
+                        help="per-source cap for --query")
+    parser.add_argument("--format", choices=_BIB_FORMATS, default="harvard",
+                        help="reference-list style (default: harvard, i.e. Cite Them Right)")
+    parser.add_argument("--accessed", default="", metavar="DATE",
+                        help="access date for harvard 'Available at' links")
+    parser.add_argument("--out", metavar="FILE", default=None, help="write to FILE")
+    _add_workspace_flag(
+        parser, "render the canonical set in DIR instead of --from-file"
+    )
+
+
+def _add_matrix_parsers(sub) -> None:
+    for name, help_text in (
+        ("matrix", "Literature Matrix: one row per paper"),
+        ("synthesis", "Synthesis Matrix: a dimension cross-tabbed against screening"),
+    ):
+        parser = sub.add_parser(name, help=help_text)
+        parser.add_argument("identifiers", nargs="*", metavar="IDENTIFIER")
+        parser.add_argument("--query", default=None, metavar="TEXT")
+        parser.add_argument("--from-file", dest="from_file", metavar="FILE", default=None)
+        parser.add_argument("--source", action="append", dest="sources", metavar="NAME",
+                            default=None)
+        parser.add_argument("--get-source", dest="get_source", metavar="NAME", default=None)
+        parser.add_argument("--max", type=int, default=None, metavar="N")
+        parser.add_argument("--format", choices=("csv", "markdown"), default="csv")
+        parser.add_argument("--require-screening", dest="require_screening",
+                            action="store_true",
+                            help="refuse to render an unscreened set (any record "
+                            "still 'unreviewed'); a matrix records screening "
+                            "decisions, so this is the lab deliverable, not a dump")
+        parser.add_argument("--out", metavar="FILE", default=None)
+        _add_workspace_flag(
+            parser, "render the canonical set in DIR instead of --from-file"
+        )
+        if name == "matrix":
+            parser.add_argument("--columns", default=None, metavar="A,B,C",
+                                help="comma-separated matrix columns")
+        else:
+            parser.add_argument("--dimension", default="year",
+                                choices=("label", "year", "type", "venue", "open_access"),
+                                help="what to cross-tab (default: year)")
+
+    summary = sub.add_parser("summary", help="screening counts per triage label")
+    summary.add_argument("identifiers", nargs="*", metavar="IDENTIFIER")
+    summary.add_argument("--query", default=None, metavar="TEXT")
+    summary.add_argument("--from-file", dest="from_file", metavar="FILE", default=None)
+    summary.add_argument("--source", action="append", dest="sources", metavar="NAME",
+                         default=None)
+    summary.add_argument("--get-source", dest="get_source", metavar="NAME", default=None)
+    summary.add_argument("--max", type=int, default=None, metavar="N")
+    summary.add_argument("--format", choices=("table", "json"), default="table")
+    summary.add_argument("--out", metavar="FILE", default=None)
+    _add_workspace_flag(
+        summary, "summarise the canonical set in DIR instead of --from-file"
+    )
+
+
+def _add_web_search_parser(sub) -> None:
+    parser = sub.add_parser("web-search", help="search Stack Overflow / Reddit records")
+    parser.add_argument("query", help="free-text query")
+    parser.add_argument("--source", default="stackoverflow",
+                        choices=("stackoverflow", "reddit"), help="web source")
+    parser.add_argument("--max", type=int, default=None, metavar="N")
+    parser.add_argument("--sort", default=None, metavar="KEY", help="source-specific sort")
+    parser.add_argument("--site", default=None, metavar="SITE",
+                        help="Stack Exchange site (e.g. serverfault)")
+    parser.add_argument("--subreddit", default=None, metavar="NAME", help="reddit scope")
+    parser.add_argument("--time", default=None, metavar="RANGE",
+                        help="reddit time window (hour|day|week|month|year|all)")
+    parser.add_argument("--format", choices=("table", "json", "bibtex", "ris", "csl"),
+                        default="table")
+    parser.add_argument("--accessed", default="", metavar="DATE")
+    parser.add_argument("--out", metavar="FILE", default=None)
+
+
+def _add_extract_parser(sub) -> None:
+    parser = sub.add_parser(
+        "extract", help="pull text or page-anchored quotes out of downloaded PDFs"
+    )
+    parser.add_argument("paths", nargs="+", help="PDF files, or directories of them")
+    parser.add_argument("--pages", default=None, metavar="SPEC",
+                        help="page selection, e.g. 1-5,10 (default: whole file)")
+    parser.add_argument("--quotes", action="store_true",
+                        help="capture quotes instead of raw text")
+    parser.add_argument("--terms", default="", metavar="WORDS",
+                        help="comma-separated terms a quote must contain")
+    parser.add_argument("--window", type=int, default=240, metavar="CHARS",
+                        help="characters of context around a match (default: 240)")
+    parser.add_argument("--limit", type=int, default=10, metavar="N",
+                        help="max quotes per file (default: 10)")
+    parser.add_argument("--out", metavar="FILE", default=None,
+                        help="write quotes as JSON, or append text, to FILE")
+
+
+def _add_workspace_parser(sub) -> None:
+    """The ``workspace`` command group: init / status / log / round / export / import."""
+    parser = sub.add_parser(
+        "workspace",
+        help="manage a workspace (results.json + search log + meta)",
+    )
+    actions = parser.add_subparsers(dest="workspace_command", required=True)
+
+    init = actions.add_parser("init", help="create a workspace directory")
+    init.add_argument("path", help="workspace directory (absolute, or under RESEARCHER_HOME)")
+    init.add_argument("--topic", default="", metavar="TEXT")
+
+    status = actions.add_parser("status", help="counts, round, provenance and paths")
+    status.add_argument("path")
+    status.add_argument("--format", choices=("table", "json"), default="table")
+
+    log = actions.add_parser("log", help="print the provenance log")
+    log.add_argument("path")
+    log.add_argument("--format", choices=("md", "jsonl", "json"), default="md")
+    log.add_argument("--round", type=int, default=None, metavar="N")
+
+    round_parser = actions.add_parser("round", help="show or advance the round")
+    round_parser.add_argument("path")
+    action = round_parser.add_mutually_exclusive_group(required=True)
+    action.add_argument("--next", action="store_true", help="snapshot and advance")
+    action.add_argument("--set", type=int, default=None, metavar="N")
+    round_parser.add_argument("--label", default="", metavar="TEXT")
+
+    export = actions.add_parser("export", help="write the canonical set to a file")
+    export.add_argument("path")
+    export.add_argument("--out", required=True, metavar="FILE")
+    export.add_argument("--format", choices=("json", "jsonl"), default="json")
+
+    adopt = actions.add_parser(
+        "import", help="adopt pre-workspace results (and optionally a legacy log)"
+    )
+    adopt.add_argument("path")
+    adopt.add_argument("--results", required=True, metavar="FILE")
+    adopt.add_argument("--log", default=None, metavar="FILE")
+    adopt.add_argument("--round", type=int, default=1, metavar="N")
+    adopt.add_argument("--topic", default="", metavar="TEXT")
+    adopt.add_argument(
+        "--mode",
+        choices=("snapshot", "merge"),
+        default="snapshot",
+        help="snapshot replaces the set; merge folds this file into it "
+        "(use merge for disjoint legacy round files)",
+    )
+    adopt.add_argument("--dry-run", dest="dry_run", action="store_true")
 
 
 #: Registry key -> the function that runs it.
 _HANDLERS: dict[str, Handler] = {
     "info": cmd_info,
+    "workspace": cmd_workspace,
     "sources": cmd_sources,
     "search": cmd_search,
     "get": cmd_get,
     "download": cmd_download,
+    "references": cmd_references,
+    "citations": cmd_citations,
+    "bibliography": cmd_bibliography,
+    "matrix": cmd_matrix,
+    "synthesis": cmd_synthesis,
+    "summary": cmd_summary,
+    "web-search": cmd_web_search,
+    "extract": cmd_extract,
+    "label": cmd_label,
 }
 
 

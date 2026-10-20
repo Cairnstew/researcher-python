@@ -28,6 +28,7 @@ import os
 import tempfile
 from collections.abc import Iterable, Iterator, Mapping
 from contextlib import contextmanager
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, TextIO
@@ -37,8 +38,10 @@ from .models import Paper
 
 __all__ = [
     "SCHEMA_VERSION",
+    "Envelope",
     "from_json",
     "from_jsonl",
+    "read_envelope",
     "to_json",
     "to_jsonl",
 ]
@@ -118,8 +121,24 @@ def _dump(payload: dict[str, Any], dest: Any, *, indent: int | None) -> None:
 # ---------------------------------------------------------------------- #
 
 
-def from_json(src: str | os.PathLike[str] | TextIO) -> list[Paper]:
-    """Read a JSON envelope written by :func:`to_json`."""
+@dataclass(slots=True)
+class Envelope:
+    """A parsed JSON result envelope — records plus the provenance ``meta``.
+
+    A workspace needs both halves: the papers to merge forward and the ``meta``
+    to show what search produced them.  :func:`from_json` still returns only
+    the papers, so existing callers see no change.
+    """
+
+    papers: list[Paper] = field(default_factory=list)
+    meta: dict[str, Any] = field(default_factory=dict)
+    schema_version: int = SCHEMA_VERSION
+    generated_at: str = ""
+    count: int = 0
+
+
+def read_envelope(src: str | os.PathLike[str] | TextIO) -> Envelope:
+    """Read a JSON envelope written by :func:`to_json`, keeping its ``meta``."""
     try:
         with _text(src) as handle:
             payload = json.load(handle)
@@ -136,7 +155,33 @@ def from_json(src: str | os.PathLike[str] | TextIO) -> list[Paper]:
 
     _check_version(payload)
     raw = _require_papers(payload)
-    return [_coerce(entry, f"index {index}") for index, entry in enumerate(raw)]
+    papers = [_coerce(entry, f"index {index}") for index, entry in enumerate(raw)]
+
+    meta = payload.get("meta") or {}
+    if not isinstance(meta, Mapping):
+        raise ExportError(
+            f"'meta' in {_label(src)} must be an object, "
+            f"got {type(meta).__name__}"
+        )
+
+    raw_count = payload.get("count")
+    count = (
+        raw_count
+        if isinstance(raw_count, int) and not isinstance(raw_count, bool)
+        else len(papers)
+    )
+    return Envelope(
+        papers=papers,
+        meta=dict(meta),
+        schema_version=int(payload["schema_version"]),
+        generated_at=str(payload.get("generated_at") or ""),
+        count=count,
+    )
+
+
+def from_json(src: str | os.PathLike[str] | TextIO) -> list[Paper]:
+    """Read a JSON envelope written by :func:`to_json` (papers only)."""
+    return read_envelope(src).papers
 
 
 def from_jsonl(src: str | os.PathLike[str] | TextIO) -> list[Paper]:

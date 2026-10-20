@@ -78,7 +78,9 @@ KNOWN_IDS: dict[str, str] = {
     "arxiv": "1706.03762",
     "openalex": "10.1038/nature14539",
     "crossref": "10.1038/nature14539",
-    "semantic_scholar": "10.1038/nature14539",
+    # S2 404s on 10.1038/nature14539 (verified live 2026-10-06), so use the
+    # NEJM record it does index — same DOI the pubmed check uses.
+    "semantic_scholar": "10.1056/NEJMoa2034577",
     "pubmed": "10.1056/NEJMoa2034577",
 }
 

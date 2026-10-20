@@ -32,7 +32,14 @@ from ..config import Settings
 from ..errors import NotFoundError, RateLimitError, SourceError
 from ..ids import is_arxiv_id, is_doi, is_pmid, normalize_arxiv_id, normalize_doi, normalize_orcid, normalize_pmid
 from ..models import Author, Paper
-from .base import Capabilities, Source, parse_retry_after, squash_text
+from .base import (
+    Capabilities,
+    SearchFilters,
+    Source,
+    apply_filters,
+    parse_retry_after,
+    squash_text,
+)
 
 __all__ = ["OpenAlexSource", "reconstruct_abstract", "parse_openalex_work"]
 
@@ -373,18 +380,42 @@ class OpenAlexSource(Source):
 
     # -- operations ------------------------------------------------------
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
         self.require_support("search")
         want = self.settings.max_results if limit is None else max(0, int(limit))
         text = (query or "").strip()
         if want == 0 or not text:
             return []
 
+        params: dict[str, Any] = {}
+        if filters is not None and filters.field != "any":
+            # title.search / abstract.search are OpenAlex filter keys, so the
+            # scope is applied by the server rather than after the fact.
+            key = "title.search" if filters.field == "title" else "abstract.search"
+            params["filter"] = f"{key}:{text}"
+        else:
+            params["search"] = text
+        if filters is not None:
+            if filters.year_from is not None:
+                params["filter"] = ",".join(
+                    x for x in (params.get("filter", ""), f"from_publication_date:{filters.year_from}-01-01") if x
+                )
+            if filters.year_to is not None:
+                params["filter"] = ",".join(
+                    x for x in (params.get("filter", ""), f"to_publication_date:{filters.year_to}-12-31") if x
+                )
+
         collected: list[Paper] = []
         page = 1
         while len(collected) < want:
             batch = self._works(
-                {"search": text, "per-page": min(_PAGE_SIZE, want - len(collected)), "page": page}
+                {**params, "per-page": min(_PAGE_SIZE, want - len(collected)), "page": page}
             )
             if not batch:
                 break
@@ -392,7 +423,7 @@ class OpenAlexSource(Source):
             if len(batch) < min(_PAGE_SIZE, want - len(collected) + len(batch)):
                 break
             page += 1
-        return collected[:want]
+        return apply_filters(collected, filters, query)[:want]
 
     def get(self, key: str) -> Paper:
         self.require_support("get")

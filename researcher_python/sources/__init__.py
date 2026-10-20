@@ -35,10 +35,19 @@ _REGISTRY: dict[str, tuple[str, str]] = {
     ),
     "crossref": ("researcher_python.sources.crossref_source", "CrossrefSource"),
     "pubmed": ("researcher_python.sources.pubmed_source", "PubMedSource"),
+    # ACM's Digital Library: a prefix-scoped view of Crossref (no DL API exists).
+    "acm": ("researcher_python.sources.acm_source", "ACMSource"),
+    # Repository/thesis/deliverable aggregator — the grey-literature route.
+    "openaire": ("researcher_python.sources.openaire_source", "OpenAIRESource"),
 }
 
 #: Order used when the caller names no sources: broad free-text first, then
-#: identifier authority, then the two biomedical indexes.
+#: identifier authority, then the biomedical index, then the two specialisms.
+#:
+#: ``acm`` and ``openaire`` are deliberately *not* here: both are subsets or
+#: facets of Crossref's reach, and adding them to every unqualified search
+#: would inflate results with records the broad sources already returned.
+#: Name them (``--source acm``) when the specialism is the point.
 DEFAULT_SOURCES: tuple[str, ...] = (
     "openalex",
     "semantic_scholar",

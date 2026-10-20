@@ -25,7 +25,12 @@ class Settings:
 
     #: Polite-pool identifier for OpenAlex / Crossref / Unpaywall.
     email: str = ""
-    #: Optional Semantic Scholar API key (2 rps keyless -> 10 rps with key).
+    #: Optional Semantic Scholar API key.  S2's documented rate limit is ~1
+    #: request/second, *cumulative across all endpoints* — search, get,
+    #: references and citations share one gate per adapter instance
+    #: (``semantic_scholar_source._INTERVAL`` = 1.1s).  The key is sent as
+    #: ``x-api-key`` so calls are attributed rather than drawing on the shared
+    #: anonymous pool that keyless traffic hits.
     semantic_scholar_api_key: str = ""
     #: Optional OpenAlex API key.  Anonymous *search* on OpenAlex is served by a
     #: cluster that pauses periodically (HTTP 503 "Anonymous search is paused");
@@ -33,8 +38,29 @@ class Settings:
     openalex_api_key: str = ""
     #: Optional NCBI E-utilities API key (3 rps -> 10 rps with key).
     ncbi_api_key: str = ""
+    #: Optional Stack Exchange API key.  Without one the anonymous IP bucket
+    #: is shared (quota observed as 300/day); a key raises the application
+    #: quota.  Sent as the ``key`` request parameter, never logged.
+    stackexchange_key: str = ""
+    #: Optional Reddit OAuth app (client) credentials for the web-source
+    #: framework.  Reddit's anonymous JSON endpoints are closed (HTTP 403 to
+    #: keyless data consumers), so ``web_search(source="reddit")`` requires a
+    #: registered app these two identifiers.  Sent as HTTP Basic auth on the
+    #: ``/api/v1/access_token`` POST, never logged.
+    reddit_client_id: str = ""
+    reddit_client_secret: str = ""
     #: Where :func:`researcher_python.download.save_pdf` writes files.
     output_dir: Path = Path("downloads")
+    #: Root for *named* workspaces (``RESEARCHER_HOME``).  A relative
+    #: :class:`researcher_python.workspace.Workspace` path resolves under this
+    #: directory, so a globally launched MCP server does not depend on the
+    #: process cwd.  ``None`` falls back to cwd for backwards compatibility.
+    home: Path | None = None
+    #: Default workspace when a tool omits one (``RESEARCHER_WORKSPACE``).
+    workspace: Path | None = None
+    #: Explicit ``.env`` path (``RESEARCHER_ENV_FILE``), so a server started
+    #: from an arbitrary directory still finds credentials.
+    env_file: Path | None = None
     #: ``DEBUG``/``INFO``/``WARNING``/... used by ``setup_logging``.
     log_level: str = "INFO"
 
@@ -96,6 +122,9 @@ class Settings:
                 "semantic_scholar_api_key": "RESEARCHER_SEMANTIC_SCHOLAR_API_KEY",
                 "openalex_api_key": "RESEARCHER_OPENALEX_API_KEY",
                 "ncbi_api_key": "RESEARCHER_NCBI_API_KEY",
+                "stackexchange_key": "RESEARCHER_STACKEXCHANGE_KEY",
+                "reddit_client_id": "RESEARCHER_REDDIT_CLIENT_ID",
+                "reddit_client_secret": "RESEARCHER_REDDIT_CLIENT_SECRET",
             }.get(name, name)
             raise ConfigurationError(
                 f"setting {name!r} is required; export {env_name} first"
@@ -109,7 +138,13 @@ ENV_KEYS = {
     "RESEARCHER_SEMANTIC_SCHOLAR_API_KEY": "semantic_scholar_api_key",
     "RESEARCHER_OPENALEX_API_KEY": "openalex_api_key",
     "RESEARCHER_NCBI_API_KEY": "ncbi_api_key",
+    "RESEARCHER_STACKEXCHANGE_KEY": "stackexchange_key",
+    "RESEARCHER_REDDIT_CLIENT_ID": "reddit_client_id",
+    "RESEARCHER_REDDIT_CLIENT_SECRET": "reddit_client_secret",
     "RESEARCHER_OUTPUT_DIR": "output_dir",
+    "RESEARCHER_HOME": "home",
+    "RESEARCHER_WORKSPACE": "workspace",
+    "RESEARCHER_ENV_FILE": "env_file",
     "RESEARCHER_LOG_LEVEL": "log_level",
     "RESEARCHER_MAX_RESULTS": "max_results",
     "RESEARCHER_RETRIES": "retries",
@@ -118,18 +153,26 @@ ENV_KEYS = {
 
 _INT_FIELDS = frozenset({"max_results", "retries"})
 _FLOAT_FIELDS = frozenset({"timeout"})
+_PATH_FIELDS = frozenset({"output_dir", "home", "workspace", "env_file"})
 
 
 def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     """Build :class:`Settings` from ``env`` (default: ``os.environ``).
 
-    When ``env`` is ``None`` a ``.env`` file in the working directory is loaded
-    first (non-destructively: existing environment variables win), then the
-    process environment is read.  Passing an explicit mapping skips dotenv
-    entirely, which is what the tests do.
+    When ``env`` is ``None`` one ``.env`` is loaded first, non-destructively
+    (existing environment variables win): ``RESEARCHER_ENV_FILE`` if set, else
+    ``$RESEARCHER_HOME/.env``, else ``~/.config/researcher-python/.env``, else
+    ``./.env``.  Then the process environment is read.  Passing an explicit
+    mapping skips dotenv entirely, which is what the tests do.
     """
     if env is None:
-        _load_dotenv()
+        # The env-file search itself must read the process environment first:
+        # a globally registered MCP server has no useful cwd, so
+        # RESEARCHER_ENV_FILE / RESEARCHER_HOME decide where .env lives.
+        _load_dotenv(
+            env_file=os.environ.get("RESEARCHER_ENV_FILE"),
+            home=os.environ.get("RESEARCHER_HOME"),
+        )
         env = os.environ
 
     values: dict[str, object] = {}
@@ -151,8 +194,8 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
                 raise ConfigurationError(
                     f"{env_name} must be a number, got {raw!r}"
                 ) from exc
-        elif field_name == "output_dir":
-            values[field_name] = Path(raw)
+        elif field_name in _PATH_FIELDS:
+            values[field_name] = Path(raw).expanduser()
         else:
             values[field_name] = raw
 
@@ -161,8 +204,18 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     return Settings(**values)  # type: ignore[arg-type]
 
 
-def _load_dotenv() -> None:
-    """Load ``.env`` if python-dotenv is importable; never fail if it is not.
+def _load_dotenv(
+    *, env_file: str | None = None, home: str | None = None
+) -> None:
+    """Load ``.env`` from the first location that makes sense.
+
+    Order:
+
+    1. an explicit ``RESEARCHER_ENV_FILE`` (an absolute path is expected; a
+       missing explicit file is a configuration error, not silently ignored);
+    2. ``$RESEARCHER_HOME/.env``;
+    3. ``~/.config/researcher-python/.env`` — the stable global location;
+    4. ``./.env`` — the historical behaviour for a repo-local run.
 
     dotenv is a convenience, not a dependency of the core — a missing package
     must not stop a caller who exported the variables by hand.
@@ -171,4 +224,22 @@ def _load_dotenv() -> None:
         from dotenv import load_dotenv  # type: ignore[import-not-found]
     except ImportError:  # pragma: no cover - optional convenience
         return
-    load_dotenv(Path(".env"), override=False)
+
+    if env_file:
+        path = Path(env_file).expanduser()
+        if not path.is_file():
+            raise ConfigurationError(
+                f"RESEARCHER_ENV_FILE points at {path}, which does not exist"
+            )
+        load_dotenv(path, override=False)
+        return
+
+    candidates: list[Path] = []
+    if home:
+        candidates.append(Path(home).expanduser() / ".env")
+    candidates.append(Path.home() / ".config" / "researcher-python" / ".env")
+    candidates.append(Path(".env"))
+    for candidate in candidates:
+        if candidate.is_file():
+            load_dotenv(candidate, override=False)
+            return

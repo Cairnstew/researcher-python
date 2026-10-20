@@ -1,6 +1,14 @@
 ---
 name: paper-analysis
-description: Use when the user gives a research paper or article (local PDF path, URL, or pasted text) and wants it analyzed against the A/B/C "Data Ethics and Research Methods" assignment template — topic and motivation, background and trends, research question, project implications and ethics, methodology, resources, skills, and validation data. Triggers: "analyze this paper", "review this article", "research question of this paper", "read this PDF and answer the template".
+description: >-
+  Use when the user gives a research paper or article (local PDF path, URL, or
+  pasted text) and wants it analyzed against the A/B/C "Data Ethics and Research
+  Methods" assignment template — topic and motivation, background and trends,
+  research question, project implications and ethics, methodology, resources,
+  skills, and validation data. Uses the researcher MCP server to corroborate the
+  background/trends section against the citation graph. Triggers: "analyze this
+  paper", "review this article", "research question of this paper", "read this
+  PDF and answer the template".
 ---
 
 # Paper Analysis (A/B/C template)
@@ -30,6 +38,68 @@ its content.
 
 Read enough of the paper to answer every template item; do not stop at the
 abstract. Prefer searching for the sections you need over reading every page.
+
+### Step 1b — Ground the record and its context (researcher MCP)
+
+The paper's *text* is the authority on what **it** claims, but the assignment's
+Section 2 (2.a current issues, 2.b trends, 2.c developments) asks about the
+wider field — and a paper's own related-work section is a partial, dated,
+self-serving view of it. The `researcher` MCP server (see
+`.opencode/opencode.json`) lets you check that view against the real literature.
+Use it when an identifier is available:
+
+| Call | Gives you |
+|---|---|
+| `researcher_search_papers` | the record (authors, year, venue, abstract, citation count) if you only have a title |
+| `researcher_get_paper` | the canonical record for a DOI / arXiv id / PMID |
+| `researcher_citations` | works citing this paper → how the field **actually built on** it (2.b trends, 2.c developments) |
+| `researcher_references` | works this paper cites → its intellectual lineage and the baselines it chose (2.a issues) |
+| `researcher_bibliography` | a citable BibTeX/RIS/CSL-JSON entry for the Source notes line |
+| `researcher_matrix` / `researcher_synthesis` | screen a found set and cross-tab it — the Literature/Synthesis Matrix artefacts |
+| `researcher_open_workspace` / `researcher_workspace_status` | persist searches and read back counts/round/provenance |
+
+When you search to corroborate Section 2, pass `sort="score"` and
+`top_ratio=0.5` rather than a large `max_results`: each source ranks by a
+private, mutually incomparable score, so an unfiltered merge keeps every
+source's weakest hits (off-topic papers, AGI philosophy beside a paper on AI
+liability). Quote the reply's `dropped` count when you report how many records
+the floor removed — a filtered list presented as "the literature" is misleading.
+
+Two further habits that pay off in practice:
+
+- **Use `field="title"` for a framework-level claim, `field="any"` for breadth.**
+  A title-scoped search is an AND match, so it returns fewer, more exact hits —
+  which is what a national/international overview section wants — while a long
+  keyword set scoped to the title can legitimately return nothing. Read the
+  reply's `hint` when it is empty; it explains which floor or AND-match emptied
+  the set. Open a workspace once (`researcher_open_workspace`) and every
+  `researcher_search_papers` records its own provenance; `workspace_status`
+  gives you the method-section audit trail. On the CLI, `--workspace DIR` does
+  the same, and `--search-log FILE` remains for a standalone table.
+- **Judge source standing explicitly.** `min_citations` is a crude filter that
+  rewards age; `citations_per_year` (available as a matrix column) is the
+  age-normalised view and the one to reason with. Neither substitutes for
+  reading the venue: a keyword search will happily surface a low-standing
+  journal beside a canonical paper.
+
+If the user is building the Week 3 lab deliverable, the **matrix is not
+optional**: a Literature Matrix is defined by its triage decisions, so rows
+still `unreviewed` are a search dump, not a literature matrix. Save the set to
+a file, set every record with `researcher_label` (`core` / `general` /
+`excluded`, with a `reason` for exclusions), then render with
+`researcher_matrix`. Check `screening.ready` in the reply, or pass
+`require_screening=True` to have the tool refuse an unscreened set.
+
+This is **corroboration, not a replacement**: the write-up must still describe
+the paper as it presents itself, with the graph used to tell the user when the
+field has moved on or when its framing is unusually narrow. If no identifier is
+available, or every call comes back `{"ok": false, ...}`, fall back to the
+paper's own related work and **say plainly** in the Source notes that Section 2
+rests on the paper's own framing rather than independent evidence.
+
+Per-source failures are normal (`{"ok": false, "error": "RateLimitError", ...}`
+for one source, records from the rest): report what could not be checked rather
+than silently presenting a partial picture as complete.
 
 ## Step 2 — Extract facts before writing
 
@@ -101,11 +171,16 @@ per answer; no preamble beyond a single citation line at the top.
 - **1.c** What the work provides for the thematic area: the problem it solves,
   the advancement it enables, the questions it makes answerable.
 - **2.a** The shortcomings of current approaches **as the paper frames them**
-  (from intro/related work), not general knowledge.
+  (from intro/related work), not general knowledge. If Step 1b surfaced the
+  paper's own reference list, name the specific prior approaches it positions
+  against rather than describing them generically.
 - **2.b** The directions/approaches currently trending in this area, as
-  evidenced by the paper's related work.
+  evidenced by the paper's related work. Where Step 1b returned citing works,
+  say how the field *subsequently* used or extended the work — that is stronger
+  evidence of a trend than the paper's own forward-looking claims.
 - **2.c** Concrete recent developments (methods, tools, datasets, practices)
-  that the paper builds on or compares against.
+  that the paper builds on or compares against. Citing works from Step 1b are
+  direct examples; name them.
 - **3.a** Quote the research question if stated. If not, write
   *"Inferred: …"* plus one sentence justifying the inference from the paper's
   objectives/contributions. Questions (or aims) are often stated as objectives
@@ -146,10 +221,16 @@ per answer; no preamble beyond a single citation line at the top.
   answers with *(inferred)* and give the reasoning.
 - Never invent page numbers or section titles — only cite locations you
   actually read.
+- Distinguish evidence about *the paper* (its text) from evidence about *the
+  field* (Step 1b citation graph). A claim drawn from the graph is not something
+  the paper said; do not attribute it to the paper.
 - If the paper is silent on an item (e.g. ethics in B), say so plainly, then
   answer with clearly-marked reasoning of your own.
 - If the paper cannot be retrieved or is unreadable, stop and report that
   instead of analyzing a different paper.
+- If a `researcher_*` call fails, do not paper over it: note in Source notes
+  which checks did not run. A Section 2 answer built only on the paper's own
+  related work must be labelled as such.
 
 ## Output delivery
 
@@ -157,4 +238,5 @@ per answer; no preamble beyond a single citation line at the top.
 - If the user asks to save it, write `<paper-short-title>-analysis.md` where
   they specify (default: current directory).
 - At the end, add a short **Source notes** line listing which sections/pages
-  each part drew from, so the answers can be checked against the paper.
+  each part drew from, and which `researcher_*` checks (if any) corroborated
+  Section 2, so the answers can be checked against the paper.

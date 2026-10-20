@@ -22,7 +22,7 @@ from ..config import Settings
 from ..errors import NotFoundError, SourceError
 from ..ids import is_arxiv_id, normalize_arxiv_id, normalize_doi
 from ..models import Author, Paper
-from .base import Capabilities, Source, require_dependency, squash_text
+from .base import Capabilities, SearchFilters, Source, apply_filters, require_dependency, squash_text
 
 __all__ = ["ArxivSource", "parse_arxiv_result"]
 
@@ -148,12 +148,23 @@ class ArxivSource(Source):
 
     # -- operations ------------------------------------------------------
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
         want = self._limit(limit)
-        if want <= 0 or not (query or "").strip():
+        text = (query or "").strip()
+        if want <= 0 or not text:
             return []
-        results = self._search(query=query.strip(), max_results=want)
-        return [parse_arxiv_result(r) for r in results[:want]]
+        if filters is not None and filters.field != "any":
+            # arXiv's own query language scopes a search natively.
+            prefix = "ti" if filters.field == "title" else "abs"
+            text = f"{prefix}:({text})"
+        papers = [parse_arxiv_result(r) for r in self._search(query=text, max_results=want)]
+        return apply_filters(papers, filters, query)[:want]
 
     def get(self, key: str) -> Paper:
         self.require_support("get")

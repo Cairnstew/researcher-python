@@ -14,6 +14,11 @@ python3.pkgs.buildPythonApplication {
   format = "pyproject";
 
   # Clean source: exclude git, cache, venv, nix, env artifacts.
+  #
+  # `.opencode/` IS shipped — it holds `opencode.json` (the MCP server
+  # registration) and the two skills that `tests/test_docs.py` guard.  Only its
+  # vendored `node_modules` (and the npm lockfiles) are dropped: they are large,
+  # machine-specific, and nothing here needs them.
   src = lib.cleanSourceWith {
     filter = path: type:
       let
@@ -24,8 +29,10 @@ python3.pkgs.buildPythonApplication {
       && base != ".pytest_cache"
       && base != ".venv"
       && base != "nix"
-      &&       base != ".env"
-      && base != ".opencode";
+      && base != ".env"
+      && base != "node_modules"
+      && base != "package-lock.json"
+      && base != "bun.lock";
     src = ./..;
   };
 
@@ -42,6 +49,8 @@ python3.pkgs.buildPythonApplication {
     habanero
     httpx
     biopython
+    mcp
+    pypdf
   ];
 
   # Run the offline suite inside the Nix sandbox: it is stricter than
@@ -56,7 +65,7 @@ python3.pkgs.buildPythonApplication {
   '';
 
   meta = with lib; {
-    description = "Unified scholarly search pipeline across arXiv, OpenAlex, Semantic Scholar, Crossref, and PubMed.";
+    description = "Unified scholarly research pipeline: search, screen, cite and read.";
     license = licenses.mit;
     maintainers = [ ];
     mainProgram = "researcher-python";

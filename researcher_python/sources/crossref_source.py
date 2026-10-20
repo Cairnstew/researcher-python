@@ -55,7 +55,15 @@ from ..ids import (
     wire_doi,
 )
 from ..models import Author, Paper
-from .base import Capabilities, Source, parse_retry_after, require_dependency, squash_text
+from .base import (
+    Capabilities,
+    SearchFilters,
+    Source,
+    apply_filters,
+    parse_retry_after,
+    require_dependency,
+    squash_text,
+)
 
 __all__ = [
     "CrossrefSource",
@@ -419,12 +427,39 @@ class CrossrefSource(Source):
 
     # -- operations ------------------------------------------------------
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self,
+        query: str,
+        *,
+        limit: int | None = None,
+        filters: SearchFilters | None = None,
+    ) -> list[Paper]:
         self.require_support("search")
         want = self.settings.max_results if limit is None else max(0, int(limit))
         text = (query or "").strip()
         if want == 0 or not text:
             return []
+
+        extra: dict[str, Any] = {}
+        if filters is not None and filters.field != "any":
+            # habanero only forwards kwargs whose name starts with ``query_``
+            # (``filter_dict``), then renames ``query_`` -> ``query.`` and
+            # ``_`` -> ``-``.  Passing ``query.title`` directly is silently
+            # dropped, which turns a field-scoped search into an unscoped one.
+            extra["query_title" if filters.field == "title" else "query_abstract"] = text
+        else:
+            extra["query"] = text
+        if filters is not None:
+            filter_parts: dict[str, Any] = {}
+            if filters.year_from is not None:
+                filter_parts["from-pub-date"] = f"{filters.year_from}-01-01"
+            if filters.year_to is not None:
+                filter_parts["until-pub-date"] = f"{filters.year_to}-12-31"
+            if filter_parts:
+                # habanero's ``works(filter=...)`` expects a dict and renders it
+                # to Crossref's ``name:value`` syntax itself; a string raises
+                # "'str' object has no attribute 'items'".
+                extra["filter"] = filter_parts
 
         collected: list[Paper] = []
         offset = 0
@@ -433,7 +468,7 @@ class CrossrefSource(Source):
             if rows <= 0:
                 break
             message = self._payload(
-                query=text, limit=rows, offset=offset, sort="score", order="desc"
+                **extra, limit=rows, offset=offset, sort="score", order="desc"
             )
             raw = message.get("items")
             items = [dict(i) for i in (raw or ()) if isinstance(i, Mapping)]
@@ -443,7 +478,7 @@ class CrossrefSource(Source):
             offset += len(items)
             if len(items) < rows:
                 break
-        return collected[:want]
+        return apply_filters(collected, filters, query)[:want]
 
     def get(self, key: str) -> Paper:
         self.require_support("get")

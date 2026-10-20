@@ -10,6 +10,9 @@ dist/
 # Environment / secrets
 .env
 
+# Research script output
+research-out/
+
 # Logs
 *.log
 

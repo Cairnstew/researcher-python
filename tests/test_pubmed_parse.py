@@ -67,7 +67,10 @@ def test_parses_structured_article() -> None:
     assert paper.categories == ["Test Methods"]
     assert paper.keywords == ["testing", "fixtures"]
     assert paper.pdf_url == ""
-    assert [a.name for a in paper.authors] == ["Smith John A", "García María"]
+    # Comma-separated: PubMed is structured (LastName + ForeName), and the
+    # reference renderers take the last token as the family name when they see
+    # no comma — which would yield "A, J.S." instead of "Smith, J.A.".
+    assert [a.name for a in paper.authors] == ["Smith, John A", "García, María"]
     assert paper.authors[1].orcid == "0000-0002-1825-0097"
     assert paper.authors[0].affiliations == [
         "Department of Testing, Example University."
@@ -273,3 +276,35 @@ def test_references_without_an_addressable_id_refuses_before_fetching() -> None:
     with pytest.raises(NotFoundError) as excinfo:
         PubMedSource(Settings(email="a@example.com")).references(Paper(title="orphan"))
     assert "no PMID" in str(excinfo.value)
+
+
+class TestPubmedNameShape:
+    """Regression: a flattened PubMed name mangles the reference list.
+
+    PubMed's XML is structured (LastName/ForeName). Joining it as
+    "LastName ForeName" without a comma makes the family-name heuristic take
+    the trailing initial as the surname, so "Tractenberg Rochelle E" rendered
+    as "E, T.R." in a Harvard reference list.
+    """
+
+    def test_name_carries_a_comma_so_the_family_name_is_unambiguous(self) -> None:
+        paper = parse_pubmed_article(articles()[0])
+        names = [a.name for a in paper.authors]
+        assert all("," in n for n in names), names
+        assert names[0] == "Smith, John A"
+
+    def test_harvard_renders_the_real_surname(self) -> None:
+        import researcher_python as rp
+
+        paper = parse_pubmed_article(articles()[0])
+        entry = rp.harvard_entry(paper, accessed="1 January 2026")
+        assert "Smith, J.A." in entry
+        assert not entry.startswith("A,")
+
+    def test_given_only_entry_still_works(self) -> None:
+        import researcher_python as rp
+
+        paper = parse_pubmed_article(articles()[0])
+        # A CollectiveName-only author has no comma to give; it must survive.
+        assert any("," in a.name or " " not in a.name for a in paper.authors)
+        assert rp.harvard_entry(paper, accessed="1 January 2026")

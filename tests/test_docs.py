@@ -93,6 +93,15 @@ REQUIRED_EXPORTS = [
     "SourceError",
     "SourceUnavailableError",
     "UnsupportedOperation",
+    # workspace state + provenance
+    "Workspace",
+    "WorkspaceError",
+    "WorkspaceSearch",
+    "SearchParams",
+    "SearchLog",
+    "merge_sets",
+    "read_envelope",
+    "import_workspace",
 ]
 
 
@@ -105,6 +114,21 @@ def test_public_api_name_is_re_exported_and_importable(name: str) -> None:
 def test_every_exported_name_exists() -> None:
     missing = [name for name in rp.__all__ if not hasattr(rp, name)]
     assert missing == []
+
+
+def test_global_opencode_module_is_shipped_but_not_applied() -> None:
+    module = ROOT / "nix" / "opencode-module.nix"
+    if not module.is_file():
+        # `nix/default.nix` excludes the build directory from the package
+        # source; this is a checkout/developer guard, not a build gate.
+        pytest.skip("nix/ is excluded from the package source")
+    text = module.read_text()
+    assert "researcher-python-mcp" in text
+    assert "RESEARCHER_HOME" in text
+    assert "RESEARCHER_ENV_FILE" in text
+    assert "my.programs.opencode.mcp.researcher" in text
+    # A module output is not a configuration: nothing enables it by default.
+    assert "default = false" not in text  # enable is an explicit option
 
 
 def test_import_does_not_eagerly_load_heavy_adapters() -> None:
@@ -198,7 +222,9 @@ class DocsFakeSource(Source):
         search=True, get=True, references=False, citations=False, pdf=True
     )
 
-    def search(self, query: str, *, limit: int | None = None) -> list[Paper]:
+    def search(
+        self, query: str, *, limit: int | None = None, filters=None
+    ) -> list[Paper]:
         papers = [
             Paper(
                 sources=["openalex"],
@@ -258,3 +284,115 @@ def test_readme_python_example_runs_offline(
     assert len(saved) == 1
     assert saved[0].read_bytes().startswith(b"%PDF-")
     capsys.readouterr()  # discard the example's own prints
+
+
+# -- .opencode MCP wiring ---------------------------------------------------
+
+OPENCODE_JSON = ROOT / ".opencode" / "opencode.json"
+SKILLS = ROOT / ".opencode" / "skills"
+RESEARCHER_SKILLS = ("research-rounds", "paper-analysis")
+
+
+def _opencode_config() -> dict:
+    import json
+
+    return json.loads(OPENCODE_JSON.read_text())
+
+
+def test_opencode_config_is_valid_json_and_declares_the_schema():
+    assert OPENCODE_JSON.exists(), "no .opencode/opencode.json"
+    config = _opencode_config()
+    assert config.get("$schema") == "https://opencode.ai/config.json"
+
+
+def test_opencode_config_registers_the_researcher_mcp_server():
+    server = _opencode_config()["mcp"]["researcher"]
+    assert server["type"] == "local"
+    assert server.get("enabled", True) is True
+    # command must be an array of strings (opencode rejects a bare string).
+    command = server["command"]
+    assert isinstance(command, list) and all(isinstance(c, str) for c in command)
+    joined = " ".join(command)
+    assert "researcher_python.mcp_server" in joined
+
+
+def test_opencode_config_command_can_actually_start_the_server():
+    """The configured argv must match a real module entry point."""
+    import importlib
+
+    server = _opencode_config()["mcp"]["researcher"]
+    joined = " ".join(server["command"])
+    assert "-m researcher_python.mcp_server" in joined
+    # The module exists, exposes a main(), and is a thin face on the library.
+    module = importlib.import_module("researcher_python.mcp_server")
+    assert callable(module.main)
+    assert sorted(module.TOOLS) == sorted(
+        [
+            "bibliography",
+            "citations",
+            "close_workspace",
+            "download_pdf",
+            "extract_text",
+            "find_quotes",
+            "get_paper",
+            "info",
+            "label",
+            "matrix",
+            "open_workspace",
+            "references",
+            "screen_summary",
+            "search_papers",
+            "sources",
+            "synthesis",
+            "web_search",
+            "workspace_next_round",
+            "workspace_status",
+        ]
+    )
+
+
+def test_opencode_config_startup_timeout_exceeds_the_default():
+    """A cold `nix develop` is slow; the 5000ms default would drop the server."""
+    server = _opencode_config()["mcp"]["researcher"]
+    assert server.get("timeout", 0) >= 60000
+
+
+def test_opencode_config_is_not_gitignored():
+    """The whole point is that it is committed with the repo."""
+    import shutil
+    import subprocess
+
+    if shutil.which("git") is None:
+        # The Nix sandbox has no git; `git check-ignore` cannot run there.
+        # The committed file itself is the real guarantee — this is a
+        # developer-machine sanity check, not a build gate.
+        pytest.skip("git is not available in this environment")
+    result = subprocess.run(
+        ["git", "check-ignore", "-q", str(OPENCODE_JSON)],
+        cwd=ROOT,
+        capture_output=True,
+    )
+    assert result.returncode != 0, ".opencode/opencode.json is gitignored"
+
+
+@pytest.mark.parametrize("skill", RESEARCHER_SKILLS)
+def test_skill_documents_the_mcp_tools_it_uses(skill: str) -> None:
+    """A skill that drives the server must name the tools, and all must exist."""
+    import researcher_python.mcp_server as mcp_mod
+
+    text = (SKILLS / skill / "SKILL.md").read_text()
+    # ``researcher_<tool>`` but not ``researcher_python`` (the package/module
+    # path, which appears in the CLI-fallback notes).
+    referenced = set(re.findall(r"researcher_(?!python\b)([a-z_]+)\b", text))
+    assert referenced, f"{skill} references no researcher_* tools"
+    unknown = referenced - set(mcp_mod.TOOLS)
+    assert not unknown, f"{skill} names tools that do not exist: {sorted(unknown)}"
+
+
+@pytest.mark.parametrize("skill", RESEARCHER_SKILLS)
+def test_skill_frontmatter_is_well_formed(skill: str) -> None:
+    path = SKILLS / skill / "SKILL.md"
+    text = path.read_text()
+    assert text.startswith("---\n"), f"{skill} has no frontmatter"
+    assert f"name: {skill}" in text, "frontmatter name must match the folder"
+    assert "description:" in text, "a skill without a description is never loaded"
