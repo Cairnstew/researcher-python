@@ -42,6 +42,19 @@ build:
 check:
     nix flake check
 
+# Fail on untracked source files, then evaluate and build the flake.
+preflight:
+    out=$(git ls-files --others --exclude-standard -- researcher_python tests nix scripts .opencode); if [ -n "$out" ]; then echo "untracked source files (git add them):"; echo "$out"; exit 1; fi
+    nix flake check
+
+# Regenerate uv.lock after editing pyproject.toml (the only dependency source).
+lock:
+    nix shell nixpkgs#uv --command uv lock
+
+# Install the pre-commit and pre-push hooks.
+hooks:
+    nix shell nixpkgs#pre-commit --command pre-commit install -t pre-commit -t pre-push
+
 # Enter the dev shell (Python + deps + pytest on PATH).
 dev:
     nix develop

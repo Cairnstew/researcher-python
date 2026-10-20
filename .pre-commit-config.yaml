@@ -1,0 +1,41 @@
+# Fast checks on commit; the full sandbox build on push.
+#
+# The full `nix flake check` is deliberately a pre-push hook: it builds the
+# package and runs the offline suite (~1 min), which is too slow for every
+# commit.  `nix flake check --no-build` only evaluates and does NOT catch a
+# new module that was not `git add`ed; `no-untracked-sources` catches that in
+# milliseconds, and the pre-push build is the backstop.
+repos:
+  - repo: local
+    hooks:
+      - id: no-untracked-sources
+        name: no untracked Python/Nix source files
+        entry: >-
+          bash -c 'out=$(git ls-files --others --exclude-standard --
+          researcher_python tests nix scripts .opencode);
+          if [ -n "$out" ]; then
+          echo "untracked source files (git add them):"; echo "$out"; exit 1; fi'
+        language: system
+        pass_filenames: false
+        always_run: true
+
+      - id: uv-lock-check
+        name: uv.lock is in sync with pyproject.toml
+        entry: nix shell nixpkgs#uv --command uv lock --check
+        language: system
+        pass_filenames: false
+        files: ^(pyproject\.toml|uv\.lock)$
+
+      - id: nix-eval
+        name: nix flake check (evaluate)
+        entry: nix flake check --no-build
+        language: system
+        pass_filenames: false
+        files: ^(flake\.(nix|lock)|pyproject\.toml|uv\.lock|nix/.*\.nix)$
+
+      - id: nix-build
+        name: nix flake check (build + sandbox tests)
+        entry: nix flake check
+        language: system
+        pass_filenames: false
+        stages: [pre-push]
