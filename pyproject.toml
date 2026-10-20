@@ -22,9 +22,6 @@ researcher-python = "researcher_python.cli:main"
 researcher-python-mcp = "researcher_python.mcp_server:main"
 
 [project.optional-dependencies]
-dev = [
-    "pytest>=8",
-]
 mcp = [
     "mcp>=1.9",
 ]
@@ -32,6 +29,11 @@ mcp = [
 # `extract` / the `extract_text` + `find_quotes` tools need it.
 pdf = [
     "pypdf>=5",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
 ]
 
 [tool.setuptools.packages.find]

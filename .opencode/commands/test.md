@@ -32,6 +32,8 @@ the network; everything below must pass from a clean checkout.
 Report each command's result. If a test fails, fix it before reporting done —
 do not summarize around a red suite.
 
-Context: this is a scholarly-search package with five API adapters. If you are adding a feature, first
-read `README.md`'s *Extending* section — every new runtime dependency lands in
-three places (`pyproject.toml`, `nix/default.nix`, the `flake.nix` dev shell).
+Context: this is a scholarly-search package with five API adapters. If you are
+adding a feature, first read `README.md`'s *Extending* section — every new
+runtime dependency lands in **one** place (`pyproject.toml`); run `just lock`
+to refresh `uv.lock`. The package venv and dev shell are derived from it by
+uv2nix. Do not add a dependency list to a Nix file.

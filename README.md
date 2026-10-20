@@ -45,15 +45,24 @@ subsets of Crossref's reach); name them when the specialism is the point.
 
 ## Install / develop
 
-The repo is Nix-first:
+The repo is Nix-first and uses **uv2nix**: `pyproject.toml` + `uv.lock` are the
+only dependency source, and both the package and the dev shell are derived from
+them.
 
 ```bash
-nix develop              # Python + all runtime deps + pytest on PATH
+nix develop              # editable venv: runtime extras + the dev group (pytest)
 nix develop --command pytest tests/ -q
+just build               # sandbox build + offline suite
+just check               # nix flake check
 ```
 
-`pyproject.toml` is a standard setuptools build, so `pip install -e .` works
-too if you prefer not to use Nix.
+After editing `pyproject.toml`, refresh the lock with `just lock` (or
+`nix shell nixpkgs#uv --command uv lock`). Do not add a dependency list to a
+Nix file. Inside the dev shell, do not use `uv run` — uv2nix already provides
+the venv, and `uv run` would create a second one.
+
+`pyproject.toml` remains a standard setuptools build, so `pip install -e .`
+still works if you prefer not to use Nix.
 
 ## Configuration
 
@@ -884,12 +893,14 @@ Install the optional dependency and run the server over **stdio** (the standard
 MCP transport; the client spawns it as a subprocess):
 
 ```bash
-pip install 'researcher-python[mcp]'   # or add `mcp` to the Nix shell/flake
+pip install 'researcher-python[mcp]'
 researcher-python-mcp
 ```
 
-The MCP SDK is an **optional extra**, so `import researcher_python` and the
-CLI stay lightweight and work without it.
+The MCP SDK is an **optional extra** for the PyPI package, so
+`import researcher_python` and the CLI stay lightweight and work without it.
+The Nix package enables all runtime extras (`mcp` and `pdf`) by default, so
+`nix run` and the opencode module expose the server without a separate flag.
 
 ### Tools
 
@@ -1099,13 +1110,15 @@ script, so they are easy to edit when an API changes.
 
 ## Extending
 
-Every new runtime dependency lands in three places — `pyproject.toml`,
-`nix/default.nix`, and the `flake.nix` dev shell (`nix develop` re-reads all
-three). A new source is a module under `researcher_python/sources/` plus one
-entry in that package's `_REGISTRY`; `python -m researcher_python sources`
-then reports whether it builds and which capabilities it declares. A new MCP
-tool is a `_tool_*` function plus one `@server.tool()` registration in
-`researcher_python/mcp_server.py`, with its name added to `TOOLS`.
+Every new runtime dependency lands in **one** place: `pyproject.toml`. Run
+`just lock` (or `nix shell nixpkgs#uv --command uv lock`) to refresh
+`uv.lock`; the package venv and the dev shell are derived from it by uv2nix.
+Never add a dependency list to a Nix file. A new source is a module under
+`researcher_python/sources/` plus one entry in that package's `_REGISTRY`;
+`python -m researcher_python sources` then reports whether it builds and which
+capabilities it declares. A new MCP tool is a `_tool_*` function plus one
+`@server.tool()` registration in `researcher_python/mcp_server.py`, with its
+name added to `TOOLS`.
 
 ## Known limitations
 

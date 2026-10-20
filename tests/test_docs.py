@@ -124,10 +124,10 @@ def test_every_exported_name_exists() -> None:
 
 def test_global_opencode_module_is_shipped_but_not_applied() -> None:
     module = ROOT / "nix" / "opencode-module.nix"
-    if not module.is_file():
-        # `nix/default.nix` excludes the build directory from the package
-        # source; this is a checkout/developer guard, not a build gate.
-        pytest.skip("nix/ is excluded from the package source")
+    # The uv2nix package source is the flake's git tree, so `nix/` ships in
+    # the sandbox as well as the checkout.  A missing file means the source
+    # filter (or the staging) regressed.
+    assert module.is_file(), "nix/opencode-module.nix is missing from the package source"
     text = module.read_text()
     assert "researcher-python-mcp" in text
     assert "RESEARCHER_HOME" in text

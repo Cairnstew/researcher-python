@@ -19,6 +19,15 @@ def test_version_matches_pyproject() -> None:
     assert f'version = "{researcher_python.__version__}"' in text
 
 
+def test_uv_lock_is_present() -> None:
+    """uv2nix reads uv.lock at evaluation time; the package cannot build without it."""
+    from pathlib import Path
+
+    lock = Path(__file__).resolve().parents[1] / "uv.lock"
+    assert lock.is_file(), "uv.lock is missing; run `just lock` and commit it"
+    assert lock.stat().st_size > 0
+
+
 def test_fresh_interpreter_import_configures_no_logging() -> None:
     """Importing the package must never configure logging.
 
