@@ -119,13 +119,22 @@ python -m researcher_python search "AI governance framework" \
     --from 2019 --to 2024 --field title --sort score --top-ratio 0.5 \
     --format json --out results.json
 
-# 2. Screen: label records, keeping the reason for any exclusion.
-python -m researcher_python label results.json --set core
-python -m researcher_python label results.json --id 10.1/a \
-    --set excluded --reason "outside the date window"
-python -m researcher_python label results.json --note "check the method section"
+# 2. Pre-screen: flag the obvious exclusions by rule, then judge the middle.
+python -m researcher_python prescreen results.json --year-from 2019
+python -m researcher_python prescreen results.json --year-from 2019 --apply
 
-# 3. The two matrices the Week 3 lab asks for, plus the screening counts.
+# 3. Screen: set labels, one record or a whole batch.
+python -m researcher_python screen results.json --set core
+python -m researcher_python screen results.json --id 10.1/a \
+    --set excluded --reason "outside the date window"
+python -m researcher_python screen results.json --note "check the method section"
+python -m researcher_python screen results.json --batch updates.json
+
+# 4. Snowball the core set: only records not already in the workspace, ranked
+#    by how many core papers link to them (references, citations or both).
+python -m researcher_python snowball --workspace research-out/cw1 --direction both
+
+# 5. The two matrices the Week 3 lab asks for, plus the screening counts.
 #    --require-screening refuses to emit a matrix whose rows are all
 #    'unreviewed' — a matrix IS the screening decisions.
 python -m researcher_python matrix   --from-file results.json --out matrix.csv --require-screening
@@ -133,10 +142,14 @@ python -m researcher_python matrix   --from-file results.json --columns key,labe
 python -m researcher_python synthesis --from-file results.json --dimension venue --format markdown
 python -m researcher_python summary  --from-file results.json
 
-# 4. Read a paper: text, or page-anchored quotes for your notes.
+# 6. PRISMA-style counts: identified -> deduped -> screened -> included,
+#    derived from the workspace log and the labels.
+python -m researcher_python prisma research-out/cw1 --format markdown
+
+# 7. Read a paper: text, or page-anchored quotes for your notes.
 python -m researcher_python extract downloads/ --quotes --terms "governance"
 
-# 5. The reference list — from the file you screened, so it is reproducible.
+# 8. The reference list — from the file you screened, so it is reproducible.
 python -m researcher_python bibliography --from-file results.json \
     --accessed "22 October 2026" --out references.txt
 ```
@@ -146,6 +159,44 @@ are all `unreviewed` is not a literature matrix — it is a search dump with a
 header row. The tools therefore say so: `matrix` and `synthesis` report
 `screening.ready`, warn on stderr when a set is unscreened, and refuse outright
 under `--require-screening` / `require_screening=True`.
+
+### Batch screening and pre-screening
+
+`screen` (the verb; `label` names the stored field and remains a parser alias)
+accepts a batch so screening 1,000 records does not take 1,000 calls:
+
+```json
+[
+  {"id": "10.1/a", "label": "core"},
+  {"ids": ["10.1/b", "10.1/c"], "label": "excluded", "reason": "off topic"},
+  {"id": "10.1/d", "note": "re-read the method section"}
+]
+```
+
+`--batch FILE` accepts a JSON array or JSONL (`-` reads stdin). The batch is
+validated before anything is written; `--lenient` applies the valid entries and
+reports invalid ones. Unmatched ids are reported, never silently ignored.
+`python -m researcher_python label ...` is the compatibility alias and behaves
+exactly like `screen`.
+
+`prescreen` evaluates a fixed, ordered rule set — no title, no abstract, a
+work type in `grant`/`standard`/`dataset`, and a year outside `--year-from`/
+`--year-to` — and reports candidates by default. An unknown year is kept, and a
+record that already carries a human label is skipped. `--apply` writes those
+records as `excluded` with a `pre-screen:` reason; it is opt-in because "no
+abstract" is a false positive for grey literature.
+
+`snowball` selects the records labelled `core` (or explicit `--id`s), walks
+`references`, `citations` or both, drops records already in the workspace, and
+ranks the rest by how many core papers link to them. `--no-persist` previews;
+by default the candidates merge into the workspace and the expansion is
+recorded as a `snowball` provenance row. `--min-links 2` keeps only records
+corroborated by two or more core papers.
+
+`prisma` joins the append-only search log (identification, per-source counts)
+to the labels (screened/excluded/included) and reports the flow, with
+`--format markdown` for an appendix. Gaps are stated in `warnings`: an imported
+workspace with no log has no honest identification count.
 
 ### Subcommands
 
@@ -162,7 +213,11 @@ under `--require-screening` / `require_screening=True`.
 | `matrix` | the Literature Matrix (CSV or Markdown) |
 | `synthesis` | the Synthesis Matrix (a dimension × screening) |
 | `summary` | screening counts per triage label |
-| `label` | set screening labels / notes on a saved result set or a workspace |
+| `screen` | screen records: set labels / notes, one or a batch (`label` is an alias) |
+| `label` | alias of `screen` (the stored field is still called `label`) |
+| `prescreen` | flag obvious exclusions by rule; report by default, `--apply` writes them |
+| `snowball` | expand a core set through references/citations, ranked by link count |
+| `prisma` | PRISMA-style flow counts from the workspace log and labels |
 | `workspace` | create / inspect / log / round / export / import a workspace |
 | `web-search` | Stack Overflow / Reddit records |
 | `extract` | PDF text, or page-anchored quotes |
@@ -175,8 +230,9 @@ python -m researcher_python extract downloads/paper.pdf --pages 5-9
 ```
 
 `search`, `references`, `citations`, `bibliography`, `matrix`, `synthesis`,
-`summary` and `web-search` all take `--format` (table/json/jsonl/harvard/bibtex/
-ris/csl where applicable), and `--out FILE` except `summary`/`label`.
+`summary`, `screen`, `prescreen`, `snowball`, `prisma` and `web-search` all
+take `--format` (table/json/jsonl/markdown/harvard/bibtex/ris/csl where
+applicable), and `--out FILE` where the command writes a document.
 
 `search` accepts `--format {table,json,jsonl,harvard,bibtex,ris,csl}` and
 `--out FILE` (combining `--out` with `table` is a usage error). `--log-level
@@ -621,6 +677,44 @@ follows the usual "first seen wins, fill the gaps" rule, so a label is never
 clobbered by a fresher source hit. An unknown label raises rather than storing
 junk; `Paper.triage_label()` reads an unrecognised value as `unreviewed`.
 
+### The screening loop as a library
+
+The three pure pieces behind the CLI/MCP screening commands are public:
+
+```python
+import researcher_python as rp
+
+papers = [
+    rp.Paper(doi="10.1/a", title="AI governance", abstract="text", year=2022),
+    rp.Paper(doi="10.1/b", title="A dataset", abstract="text", year=2022,
+             work_type="dataset"),
+    rp.Paper(doi="10.1/c", title="Old work", abstract="", year=2010),
+]
+
+# 1. Batch labels: validate, then apply in one pass.
+outcome = rp.apply_updates(
+    papers,
+    [
+        {"id": "10.1/a", "label": "core"},
+        {"ids": ["10.1/b", "10.1/c"], "label": "excluded", "reason": "screened out"},
+    ],
+)
+print(outcome.labelled, outcome.unmatched)
+
+# 2. Pre-screen candidates (a report, not a decision).
+report = rp.prescreen(papers, rp.PrescreenCriteria(year_from=2019))
+print(report.flagged, report.counts_by_rule)
+
+# 3. PRISMA-style flow, from labels + an (here empty) log.
+print(rp.prisma_report(papers, []))
+```
+
+`rp.snowball_expand(core_papers, direction="both", known=papers)` is the
+network half of snowballing: it calls `citation.references`/`citations`, drops
+records in `known`, and returns `SnowballResult` candidates ranked by
+`Candidate.links`. `Workspace.expand` wraps it to select the `core` label,
+persist the candidates and write the `snowball` provenance row.
+
 ### Bibliography formats
 
 `to_bibtex`, `to_ris` and `to_csl_json` render any paper list **locally** — no
@@ -771,6 +865,10 @@ CLI stay lightweight and work without it.
 | `synthesis` | Synthesis Matrix + screening counts | `matrix.render_synthesis_*` |
 | `screen_summary` | counts per triage label | `matrix.screen_summary` |
 | `label` | set labels / notes on a saved result set or workspace | `Paper.label_as` / `.note` |
+| `screen` | verb alias of `label`; accepts a batch of updates | `screening.apply_updates` |
+| `prescreen` | flag obvious exclusions by rule (report by default) | `screening.prescreen` |
+| `snowball` | expand the core set through the citation graph | `snowball.expand` |
+| `prisma` | identified/deduped/screened/included flow | `prisma.prisma_report` |
 | `extract_text` | plain text of a local PDF | `extract.extract_text` |
 | `find_quotes` | page-anchored quotes from a PDF | `extract.find_quotes` |
 
@@ -938,8 +1036,9 @@ tool is a `_tool_*` function plus one `@server.tool()` registration in
   Rose), legislation databases and paywalled textbooks still need manual
   lookup; `openaire` covers repositories and theses, not statutory sources.
 - **Harvard has no edition/place data.** Omitted, not invented — see above.
-- **Screening state is per-file, not shared.** Two result files for the same
-  topic hold independent labels; there is no cross-file library.
+- **Screening state is per-file or per-workspace, not a cross-file library.**
+  Two standalone result files for the same topic hold independent labels; use
+  a workspace when you want one shared set, log and PRISMA report.
 - `Bio.Entrez` stores its `email`/`tool`/`api_key` **process-globally**, so two
   `PubMedSource` instances configured differently in one process clobber each
   other.

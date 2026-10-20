@@ -85,10 +85,12 @@ Two further habits that pay off in practice:
 If the user is building the Week 3 lab deliverable, the **matrix is not
 optional**: a Literature Matrix is defined by its triage decisions, so rows
 still `unreviewed` are a search dump, not a literature matrix. Save the set to
-a file, set every record with `researcher_label` (`core` / `general` /
-`excluded`, with a `reason` for exclusions), then render with
-`researcher_matrix`. Check `screening.ready` in the reply, or pass
-`require_screening=True` to have the tool refuse an unscreened set.
+a file, screen every record with `researcher_screen` (`core` / `general` /
+`excluded`, with a `reason` for exclusions; batch `updates=[...]` is one call),
+then render with `researcher_matrix`. Check `screening.ready` in the reply, or
+pass `require_screening=True` to have the tool refuse an unscreened set. Use
+`researcher_prescreen` first for the obvious exclusions and
+`researcher_snowball` on the `core` set when the graph should broaden recall.
 
 This is **corroboration, not a replacement**: the write-up must still describe
 the paper as it presents itself, with the graph used to tell the user when the

@@ -42,6 +42,8 @@ from .config import Settings, load_settings
 from .download import download_pdf
 from .errors import ConfigurationError, ResearcherError
 from .models import SORT_MODES, TRIAGE_LABELS, Paper
+from .prisma import render_prisma_markdown
+from .screening import LabelUpdate, PrescreenCriteria, apply_updates
 from .sources.base import SEARCH_FIELDS, SearchFilters
 from .sources import DEFAULT_SOURCES, source_names
 from .web_sources import web_source_names
@@ -80,20 +82,34 @@ _SERVER_INSTRUCTIONS = (
     "SCREENING IS PART OF SEARCHING, NOT AN OPTIONAL EXTRA. The deliverable is "
     "a Literature Matrix, and a matrix is defined by its triage decisions: rows "
     "still marked 'unreviewed' are a raw search dump, not a literature review. "
-    "The workflow is search -> label -> matrix -> synthesis -> bibliography:\n"
+    "The workflow is search -> prescreen -> screen -> snowball -> matrix -> "
+    "synthesis -> bibliography:\n"
     "  1. open_workspace, then search_papers (persists) — or search_papers "
     "with workspace='...'. The workspace is the result set.\n"
-    "  2. 'label' on that workspace: set_label 'core' | 'general' | 'excluded' "
-    "(pass 'reason' for exclusions and 'ids' to scope the change), plus "
-    "'note' for dated reading notes. Decisions persist in the file.\n"
-    "  3. 'matrix' with from_file=that file. Check screening.ready in the "
+    "  2. 'prescreen' flags obvious exclusions by rule (no abstract, grant/"
+    "standard/dataset, outside a year window). It reports by default; pass "
+    "apply=True only after checking the candidates, because a rule can be "
+    "wrong for grey literature. It never overwrites a human label.\n"
+    "  3. 'screen' (alias 'label') sets the stored label: core | general | "
+    "excluded, plus 'reason' for exclusions and 'note' for dated reading "
+    "notes. Use 'updates': [{id|ids, label, reason, note}, ...] to screen a "
+    "batch in ONE call; unmatched ids and invalid entries are reported. The "
+    "old set_label/ids/note form still works.\n"
+    "  4. 'snowball' expands the records labelled 'core' through references, "
+    "citations or both. It returns only records not already in the workspace, "
+    "ranked by how many core papers link to them (linked_by/link count). "
+    "persist=True (the default) merges them and logs the expansion as a "
+    "provenance row; persist=False previews.\n"
+    "  5. 'matrix' with from_file=that file. Check screening.ready in the "
     "reply: it is False while any record is unreviewed. Pass "
     "require_screening=True to have the tool refuse an unscreened set instead "
     "of emitting one.\n"
-    "  4. 'synthesis' for the dimension x label cross-tab that makes a research "
-    "gap visible, and 'bibliography' with from_file= so the reference list is "
-    "reproducible from exactly what was screened.\n"
-    "Prefer from_file over a live query for steps 3-5: it renders what was "
+    "  6. 'synthesis' for the dimension x label cross-tab that makes a research "
+    "gap visible, 'prisma' for identification -> deduped -> screened -> "
+    "included counts from the log and labels, and 'bibliography' with "
+    "from_file= so the reference list is reproducible from exactly what was "
+    "screened.\n"
+    "Prefer from_file over a live query for steps 5-6: it renders what was "
     "actually screened instead of re-running a search whose results may since "
     "have changed."
 )
@@ -616,79 +632,248 @@ def _tool_label(
     note: str = "",
     out_file: str | None = None,
     workspace: str | None = None,
+    updates: list[dict[str, Any]] | None = None,
+    strict: bool = True,
 ) -> dict[str, Any]:
-    """Set screening labels / append notes to a saved result set and rewrite it.
+    """Screen records: one label/note, or a batch of per-record updates.
 
-    Screening decisions persist in the exported file, so the next matrix,
-    synthesis or bibliography render reflects them without being retyped.
-    With ``workspace`` the canonical workspace set is updated through the
-    workspace store instead of a standalone file.
+    This tool is also exposed as ``screen`` (the verb); ``label`` names the
+    stored field and remains for compatibility.  With ``updates`` the whole
+    batch is applied in one locked write — the difference between screening a
+    thousand records and making a thousand calls.
+
+    Input resolution follows the other tools: an explicit ``from_file`` or
+    ``workspace`` wins, and neither means "use the session workspace".
     """
-    if set_label is None and not note:
-        return {
-            "ok": False,
-            "error": "ConfigurationError",
-            "message": "give set_label (and/or note) to record",
-        }
-    if bool(from_file) == bool(workspace):
+    if bool(from_file) and bool(workspace):
         return {
             "ok": False,
             "error": "ConfigurationError",
             "message": "give exactly one of from_file or workspace",
         }
-    if set_label is not None and set_label not in TRIAGE_LABELS:
+    if updates is not None:
+        if set_label or ids or note or reason:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "updates cannot be combined with set_label/ids/note/reason",
+            }
+        raw_updates: list[dict[str, Any] | LabelUpdate] = list(updates)
+        if not raw_updates:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "updates is empty",
+            }
+    else:
+        if set_label is None and not note:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "give set_label (and/or note), or updates=[...]",
+            }
+        raw_updates = [
+            LabelUpdate(
+                ids=tuple(ids or ()),
+                label=set_label,
+                note=note,
+                reason=reason,
+                all_records=not ids,
+            )
+        ]
+
+    if from_file:
+        try:
+            papers = _load_result_file(from_file)
+            outcome = apply_updates(papers, raw_updates, strict=strict)
+            target = out_file or from_file
+            from .export import to_json
+
+            to_json(papers, target)
+        except ResearcherError as exc:
+            return _fail(exc)
+        return _ok(
+            file=target,
+            labelled=outcome.labelled,
+            total=len(papers),
+            summary=matrix.screen_summary(papers),
+            unmatched=outcome.unmatched,
+            invalid=outcome.invalid,
+        )
+
+    try:
+        target_workspace = _resolve_workspace(workspace)
+        if target_workspace is None:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "no workspace open; call open_workspace(path) or pass workspace='...'",
+            }
+        result = target_workspace.label_many(raw_updates, strict=strict)
+    except ResearcherError as exc:
+        return _fail(exc)
+    return _ok(
+        workspace=target_workspace.status(),
+        file=str(target_workspace.results_path),
+        labelled=result["labelled"],
+        total=result["total"],
+        summary=result["summary"],
+        unmatched=result["unmatched"],
+        invalid=result["invalid"],
+    )
+
+
+def _tool_screen(**kwargs: Any) -> dict[str, Any]:
+    """Alias of :func:`_tool_label` — the verb is "screen"."""
+    return _tool_label(**kwargs)
+
+
+def _tool_prescreen(
+    from_file: str | None = None,
+    workspace: str | None = None,
+    year_from: int | None = None,
+    year_to: int | None = None,
+    exclude_types: list[str] | None = None,
+    rules: list[str] | None = None,
+    require_abstract: bool = True,
+    require_title: bool = True,
+    apply: bool = False,
+    limit: int = 50,
+    out_file: str | None = None,
+) -> dict[str, Any]:
+    """Flag obvious exclusions by rule; report unless ``apply=True``.
+
+    A pre-screen is a *candidate* list, not a decision: "no abstract" is a
+    false positive for grey literature, which is why applying is opt-in and
+    never overwrites a record that already carries a human label.
+    """
+    if bool(from_file) and bool(workspace):
+        return {
+            "ok": False,
+            "error": "ConfigurationError",
+            "message": "give exactly one of from_file or workspace",
+        }
+    try:
+        criteria = PrescreenCriteria(
+            year_from=year_from,
+            year_to=year_to,
+            exclude_types=(
+                tuple(exclude_types)
+                if exclude_types is not None
+                else PrescreenCriteria().exclude_types
+            ),
+            require_abstract=require_abstract,
+            require_title=require_title,
+            rules=tuple(rules) if rules else None,
+        )
+    except ResearcherError as exc:
+        return _fail(exc)
+
+    if from_file:
+        try:
+            papers = _load_result_file(from_file)
+            from .screening import prescreen as _prescreen
+
+            report = _prescreen(papers, criteria)
+            applied = 0
+            if apply:
+                for hit in report.hits:
+                    if hit.paper.triage_label() != "unreviewed":
+                        continue
+                    hit.paper.label_as("excluded", "pre-screen: " + hit.reason)
+                    applied += 1
+                from .export import to_json
+
+                to_json(papers, out_file or from_file)
+            payload = report.as_dict(limit=limit)
+            payload["applied"] = applied
+            payload["summary"] = matrix.screen_summary(papers)
+            payload["file"] = out_file or from_file
+            return _ok(**payload)
+        except ResearcherError as exc:
+            return _fail(exc)
+
+    try:
+        target = _resolve_workspace(workspace)
+        if target is None:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "no workspace open; call open_workspace(path) or pass workspace='...'",
+            }
+        payload = target.prescreen(apply=apply, criteria=criteria, limit=limit)
+    except ResearcherError as exc:
+        return _fail(exc)
+    return _ok(workspace=target.status(), **payload)
+
+
+def _tool_snowball(
+    workspace: str | None = None,
+    direction: str = "both",
+    ids: list[str] | None = None,
+    core_label: str = "core",
+    limit: int | None = None,
+    sources: list[str] | None = None,
+    min_links: int = 1,
+    max_results: int = 25,
+    persist: bool = True,
+) -> dict[str, Any]:
+    """Expand the core set through references/citations, ranked by link count.
+
+    Returns only records not already in the workspace.  ``linked_by`` names
+    the core papers that linked each candidate, so a record linked by five
+    core papers is visibly stronger than one linked by one.  ``persist=True``
+    merges the candidates and logs the expansion; ``False`` previews.
+    """
+    try:
+        target = _resolve_workspace(workspace)
+        if target is None:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "no workspace open; call open_workspace(path) or pass workspace='...'",
+            }
+        payload = target.expand(
+            direction=direction,
+            ids=ids,
+            core_label=core_label,
+            limit=limit,
+            sources=sources,
+            min_links=min_links,
+            max_results=max_results,
+            persist=persist,
+        )
+    except ResearcherError as exc:
+        return _fail(exc)
+    return _ok(**payload)
+
+
+def _tool_prisma(
+    workspace: str | None = None, format: str = "json"
+) -> dict[str, Any]:
+    """PRISMA-style counts derived from the workspace log and labels."""
+    if format not in ("json", "markdown"):
         return {
             "ok": False,
             "error": "ConfigurationError",
             "message": (
-                f"unknown triage label {set_label!r}; expected one of "
-                f"{', '.join(TRIAGE_LABELS)}"
+                f"unknown prisma format {format!r}; expected json or markdown"
             ),
         }
-
-    if workspace:
-        try:
-            target = _resolve_workspace(workspace)
-            if target is None:
-                return {
-                    "ok": False,
-                    "error": "ConfigurationError",
-                    "message": "no workspace open; pass workspace='...'",
-                }
-            result = target.label(
-                ids=ids, set_label=set_label, note=note, reason=reason
-            )
-        except ResearcherError as exc:
-            return _fail(exc)
-        return _ok(
-            workspace=target.status(),
-            file=str(target.results_path),
-            labelled=result["labelled"],
-            total=result["total"],
-            summary=result["summary"],
-        )
-
-    assert from_file is not None
     try:
-        papers = _load_result_file(from_file)
-        wanted = set(ids or [])
-        touched = 0
-        for paper in papers:
-            if wanted and paper.primary_id() not in wanted:
-                continue
-            if set_label is not None:
-                paper.label_as(set_label, reason)
-            if note:
-                paper.note(note)
-            touched += 1
-        target = out_file or from_file
-        from .export import to_json
-
-        to_json(papers, target)
+        target = _resolve_workspace(workspace)
+        if target is None:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": "no workspace open; call open_workspace(path) or pass workspace='...'",
+            }
+        report = target.prisma()
     except ResearcherError as exc:
         return _fail(exc)
-    return _ok(file=target, labelled=touched, total=len(papers),
-               summary=matrix.screen_summary(papers))
+    if format == "markdown":
+        return _ok(format="markdown", text=render_prisma_markdown(report), report=report)
+    return _ok(format="json", **report)
 
 
 def _tool_extract_text(path: str, pages: str | None = None) -> dict[str, Any]:
@@ -977,6 +1162,10 @@ TOOLS = (
     "synthesis",
     "screen_summary",
     "label",
+    "screen",
+    "prescreen",
+    "snowball",
+    "prisma",
     "extract_text",
     "find_quotes",
 )
@@ -1253,17 +1442,142 @@ def build_server(settings: Settings | None = None):
         note: str = "",
         out_file: str | None = None,
         workspace: str | None = None,
+        updates: list[dict[str, Any]] | None = None,
+        strict: bool = True,
     ) -> dict:
-        """Set screening labels / append notes to a saved set or a workspace.
+        """Set screening labels / append notes (``label`` is the stored field).
 
         Screening is written back to the JSON (or the workspace's canonical
         ``results.json``) so later matrix, synthesis and bibliography renders
-        see it.  ``ids`` limits the change to those identifiers; omit it to
-        label everything.
+        see it.  Prefer the ``screen`` alias for the action.  Use
+        ``updates=[{id|ids, label, reason, note}, ...]`` to apply a batch in
+        one call; unmatched ids and invalid entries are reported.  Omitting
+        ``ids`` (and ``updates``) applies the single label to every record.
         """
         return _tool_label(
-            from_file, set_label, ids, reason, note, out_file, workspace
+            from_file=from_file,
+            set_label=set_label,
+            ids=ids,
+            reason=reason,
+            note=note,
+            out_file=out_file,
+            workspace=workspace,
+            updates=updates,
+            strict=strict,
         )
+
+    @server.tool()
+    def screen(
+        from_file: str | None = None,
+        set_label: str | None = None,
+        ids: list[str] | None = None,
+        reason: str = "",
+        note: str = "",
+        out_file: str | None = None,
+        workspace: str | None = None,
+        updates: list[dict[str, Any]] | None = None,
+        strict: bool = True,
+    ) -> dict:
+        """Screen records: set the stored label / notes, one or many.
+
+        The verb form of ``label``.  Batch shape:
+        ``updates=[{"id": "10.1/a", "label": "core"},
+        {"ids": ["10.1/b", "10.1/c"], "label": "excluded",
+        "reason": "off topic"}]``.  A batch is validated up front and written
+        once; ``strict=False`` applies the valid entries and reports the rest.
+        """
+        return _tool_screen(
+            from_file=from_file,
+            set_label=set_label,
+            ids=ids,
+            reason=reason,
+            note=note,
+            out_file=out_file,
+            workspace=workspace,
+            updates=updates,
+            strict=strict,
+        )
+
+    @server.tool()
+    def prescreen(
+        from_file: str | None = None,
+        workspace: str | None = None,
+        year_from: int | None = None,
+        year_to: int | None = None,
+        exclude_types: list[str] | None = None,
+        rules: list[str] | None = None,
+        require_abstract: bool = True,
+        require_title: bool = True,
+        apply: bool = False,
+        limit: int = 50,
+        out_file: str | None = None,
+    ) -> dict:
+        """Flag obvious exclusions by rule, without spending judgement on them.
+
+        Rules: no-title, no-abstract, type (grant/standard/dataset by default)
+        and outside-year (only when a bound is given; an unknown year is kept).
+        Reports by default; ``apply=True`` writes those records as ``excluded``
+        with a ``pre-screen:`` reason and never overwrites an existing label.
+        """
+        return _tool_prescreen(
+            from_file=from_file,
+            workspace=workspace,
+            year_from=year_from,
+            year_to=year_to,
+            exclude_types=exclude_types,
+            rules=rules,
+            require_abstract=require_abstract,
+            require_title=require_title,
+            apply=apply,
+            limit=limit,
+            out_file=out_file,
+        )
+
+    @server.tool()
+    def snowball(
+        workspace: str | None = None,
+        direction: str = "both",
+        ids: list[str] | None = None,
+        core_label: str = "core",
+        limit: int | None = None,
+        sources: list[str] | None = None,
+        min_links: int = 1,
+        max_results: int = 25,
+        persist: bool = True,
+    ) -> dict:
+        """Expand the core set through references/citations, ranked by links.
+
+        The core set is the explicit ``ids`` or every record labelled ``core``.
+        Only records not already in the workspace are returned, sorted by how
+        many core papers link to them; ``linked_by`` names those cores.  This
+        is the recall engine a keyword search cannot be.  ``persist=True``
+        merges the candidates and records the expansion in the provenance log;
+        ``persist=False`` previews.  A source failure is reported per core and
+        never aborts the rest.
+        """
+        return _tool_snowball(
+            workspace=workspace,
+            direction=direction,
+            ids=ids,
+            core_label=core_label,
+            limit=limit,
+            sources=sources,
+            min_links=min_links,
+            max_results=max_results,
+            persist=persist,
+        )
+
+    @server.tool()
+    def prisma(workspace: str | None = None, format: str = "json") -> dict:
+        """PRISMA-style counts: identified -> deduped -> screened -> included.
+
+        Derived from the workspace's append-only log (identification and
+        per-source counts) and the reader's labels.  ``format="markdown"``
+        returns a paste-ready appendix table.  Gaps are reported in
+        ``warnings`` rather than smoothed over: an imported workspace with no
+        log has no honest identification count.
+        """
+        return _tool_prisma(workspace=workspace, format=format)
 
     # --- PDF text ------------------------------------------------------
     @server.tool()

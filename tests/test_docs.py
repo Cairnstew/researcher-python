@@ -102,6 +102,12 @@ REQUIRED_EXPORTS = [
     "merge_sets",
     "read_envelope",
     "import_workspace",
+    # screening loop
+    "apply_updates",
+    "prescreen",
+    "PrescreenCriteria",
+    "SnowballResult",
+    "prisma_report",
 ]
 
 
@@ -339,9 +345,13 @@ def test_opencode_config_command_can_actually_start_the_server():
             "label",
             "matrix",
             "open_workspace",
+            "prescreen",
+            "prisma",
             "references",
+            "screen",
             "screen_summary",
             "search_papers",
+            "snowball",
             "sources",
             "synthesis",
             "web_search",

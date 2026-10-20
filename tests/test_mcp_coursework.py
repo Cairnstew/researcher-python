@@ -6,8 +6,12 @@ import json
 
 import pytest
 
-from researcher_python import export, mcp_server as mcp_mod
+from researcher_python import export, mcp_server as mcp_mod, snowball
+from researcher_python.citation import CitationResult
+from researcher_python.config import Settings
 from researcher_python.models import Author, Paper
+from researcher_python.pipeline import PipelineResult
+from researcher_python.workspace import SearchParams, Workspace
 
 
 def _paper(doi: str, year: int, title: str, **kwargs) -> Paper:
@@ -31,12 +35,104 @@ def results_file(tmp_path):
 
 class TestToolRegistration:
     def test_the_new_tools_are_declared(self) -> None:
-        for name in ("matrix", "synthesis", "screen_summary", "label",
+        for name in ("matrix", "synthesis", "screen_summary", "label", "screen",
+                     "prescreen", "snowball", "prisma",
                      "extract_text", "find_quotes"):
             assert name in mcp_mod.TOOLS
 
     def test_bibliography_defaults_to_harvard(self) -> None:
         assert mcp_mod._BIB_FORMATS[0] == "harvard"
+
+
+class TestScreeningLoopTools:
+    def test_batch_updates_apply_many_labels(self, results_file) -> None:
+        payload = mcp_mod._tool_label(
+            from_file=results_file,
+            updates=[
+                {"id": "10.1/a", "label": "general"},
+                {"id": "10.1/b", "label": "core", "note": "re-read"},
+            ],
+        )
+        assert payload["ok"] is True
+        assert payload["labelled"] == 2
+        papers = {p.doi: p for p in export.from_json(results_file)}
+        assert papers["10.1/a"].triage_label() == "general"
+        assert papers["10.1/b"].triage_label() == "core"
+        assert "re-read" in papers["10.1/b"].notes
+
+    def test_updates_cannot_be_mixed_with_the_single_form(self, results_file) -> None:
+        payload = mcp_mod._tool_label(
+            from_file=results_file,
+            set_label="core",
+            updates=[{"id": "10.1/a", "label": "general"}],
+        )
+        assert payload["ok"] is False
+        assert "updates cannot be combined" in payload["message"]
+
+    def test_label_falls_back_to_the_session_workspace(self, tmp_path) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        ws.record_search(
+            SearchParams(query="seed", sources=("openalex",), round=1),
+            PipelineResult(papers=[_paper("10.1/a", 2020, "A")], by_source={"openalex": 1}),
+        )
+        mcp_mod._set_workspace(ws)
+        try:
+            payload = mcp_mod._tool_label(set_label="core")
+        finally:
+            mcp_mod._set_workspace(None)
+        assert payload["ok"] is True
+        assert payload["labelled"] == 1
+
+    def test_prescreen_reports_then_applies(self, tmp_path) -> None:
+        target = tmp_path / "raw.json"
+        export.to_json([_paper("10.1/a", 2020, "No abstract")], target)
+        dry = mcp_mod._tool_prescreen(from_file=str(target))
+        assert dry["ok"] is True
+        assert dry["flagged"] == 1
+        assert dry["applied"] == 0
+        applied = mcp_mod._tool_prescreen(from_file=str(target), apply=True)
+        assert applied["applied"] == 1
+        assert export.from_json(str(target))[0].triage_label() == "excluded"
+
+    def test_snowball_returns_only_new_records_ranked_by_links(
+        self, monkeypatch, tmp_path
+    ) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        ws.record_search(
+            SearchParams(query="seed", sources=("openalex",), round=1),
+            PipelineResult(papers=[_paper("10.1/a", 2020, "A")], by_source={"openalex": 1}),
+        )
+        ws.label(ids=["10.1/a"], set_label="core")
+        monkeypatch.setattr(
+            snowball.citation,
+            "references",
+            lambda paper, **kwargs: CitationResult(
+                direction="references",
+                papers=[_paper("10.1/c", 2021, "Candidate")],
+                by_source={"openalex": 1},
+            ),
+        )
+        payload = mcp_mod._tool_snowball(
+            workspace=str(ws.path), direction="references", persist=False
+        )
+        assert payload["ok"] is True
+        assert payload["new"] == 1
+        assert payload["candidates"][0]["id"] == "10.1/c"
+        assert payload["candidates"][0]["links"] == 1
+
+    def test_prisma_renders_markdown(self, tmp_path) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        ws.record_search(
+            SearchParams(query="seed", sources=("openalex",), round=1),
+            PipelineResult(
+                papers=[_paper("10.1/a", 2020, "A")], by_source={"openalex": 1}
+            ),
+        )
+        ws.label(ids=["10.1/a"], set_label="core")
+        payload = mcp_mod._tool_prisma(workspace=str(ws.path), format="markdown")
+        assert payload["ok"] is True
+        assert "PRISMA-style" in payload["text"]
+        assert payload["report"]["included"] == 1
 
 
 class TestMatrixTools:

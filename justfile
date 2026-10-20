@@ -93,10 +93,19 @@ round PATH *ARGS:
 search-ws PATH *ARGS:
     {{dev}} 'python -m researcher_python search {{ARGS}} --workspace {{PATH}}'
 
-# Screening workflow: label, matrix, synthesis, summary over a saved result set.
+# Screening workflow: screen, pre-screen, snowball, matrix, synthesis, summary.
 # e.g. `just screen results.json --set core`
 screen *ARGS:
-    {{dev}} 'python -m researcher_python label {{ARGS}}'
+    {{dev}} 'python -m researcher_python screen {{ARGS}}'
+
+prescreen *ARGS:
+    {{dev}} 'python -m researcher_python prescreen {{ARGS}}'
+
+snowball *ARGS:
+    {{dev}} 'python -m researcher_python snowball {{ARGS}}'
+
+prisma *ARGS:
+    {{dev}} 'python -m researcher_python prisma {{ARGS}}'
 
 matrix *ARGS:
     {{dev}} 'python -m researcher_python matrix {{ARGS}}'

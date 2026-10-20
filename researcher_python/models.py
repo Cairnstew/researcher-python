@@ -398,6 +398,47 @@ class MergeOutcome:
     seen: list[Paper] = field(default_factory=list)
 
 
+class PaperIndex:
+    """An index of records using the same match rules as :func:`merge_sets`.
+
+    A snowball expansion needs to ask "is this candidate already in the
+    workspace?" *before* writing anything.  Reimplementing the id/title+year
+    match there would let preview and persist disagree — the exact class of
+    bug a preview feature invites.  Both now share this index.
+
+    ``add`` is idempotent: adding the same record twice does not duplicate it
+    in the title bucket.
+    """
+
+    __slots__ = ("buckets", "by_title")
+
+    def __init__(self, papers: Iterable[Paper] = ()) -> None:
+        self.buckets: dict[str, Paper] = {}
+        self.by_title: dict[str, list[Paper]] = {}
+        for paper in papers:
+            self.add(paper)
+
+    def add(self, paper: Paper) -> None:
+        for key in paper.merge_keys():
+            self.buckets.setdefault(key, paper)
+        _index_title(self.by_title, paper.title_key(), paper)
+
+    def find(self, paper: Paper) -> Paper | None:
+        """The indexed record this one describes, or ``None``."""
+        target = next(
+            (self.buckets[key] for key in paper.merge_keys() if key in self.buckets),
+            None,
+        )
+        if target is not None:
+            return target
+        title = paper.title_key()
+        if title:
+            for candidate in self.by_title.get(title, ()):
+                if _years_compatible(candidate, paper):
+                    return candidate
+        return None
+
+
 def merge_sets(
     prior: Iterable[Paper], incoming: Iterable[Paper]
 ) -> MergeOutcome:
@@ -416,46 +457,26 @@ def merge_sets(
     ordered = list(prior_list)
     prior_ids = {id(paper) for paper in prior_list}
 
-    buckets: dict[str, Paper] = {}
-    by_title: dict[str, list[Paper]] = {}
-
-    for paper in prior_list:
-        for key in paper.merge_keys():
-            buckets.setdefault(key, paper)
-        _index_title(by_title, paper.title_key(), paper)
-
+    index = PaperIndex(prior_list)
     new: list[Paper] = []
     seen: dict[int, Paper] = {}
 
     for paper in incoming:
-        keys = paper.merge_keys()
-        target = next((buckets[k] for k in keys if k in buckets), None)
-
-        if target is None:
-            incoming_title = paper.title_key()
-            if incoming_title:
-                for candidate in by_title.get(incoming_title, ()):
-                    if _years_compatible(candidate, paper):
-                        target = candidate
-                        break
+        target = index.find(paper)
 
         if target is None:
             target = paper
             ordered.append(paper)
             new.append(paper)
         elif target is not paper:
-            incoming_title = paper.title_key()
             merge(target, paper)
-            _index_title(by_title, incoming_title, target)
             if id(target) in prior_ids:
                 seen[id(target)] = target
         elif id(target) in prior_ids:
             # The same object was passed in both sets; still a seen record.
             seen[id(target)] = target
 
-        for key in keys:
-            buckets[key] = target
-        _index_title(by_title, target.title_key(), target)
+        index.add(target)
 
     return MergeOutcome(papers=ordered, new=new, seen=list(seen.values()))
 
@@ -569,6 +590,7 @@ __all__ = [
     "Author",
     "MergeOutcome",
     "Paper",
+    "PaperIndex",
     "dedupe",
     "merge",
     "merge_sets",

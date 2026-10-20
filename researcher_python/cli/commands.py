@@ -17,6 +17,7 @@ import json
 import re
 import sys
 import textwrap
+from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
@@ -25,6 +26,13 @@ from .. import __version__
 from ..config import ENV_KEYS, Settings
 from ..errors import ConfigurationError, ResearcherError, SourceUnavailableError
 from ..models import Paper
+from ..prisma import render_prisma_markdown
+from ..screening import (
+    PrescreenCriteria,
+    LabelUpdate,
+    apply_updates,
+    prescreen,
+)
 from ..sources import DEFAULT_SOURCES, create_source, get_source_class, source_names
 from ..sources.base import SEARCH_FIELDS, SearchFilters
 from ..workspace import (
@@ -45,8 +53,12 @@ __all__ = [
     "cmd_info",
     "cmd_label",
     "cmd_matrix",
+    "cmd_prescreen",
+    "cmd_prisma",
     "cmd_references",
+    "cmd_screen",
     "cmd_search",
+    "cmd_snowball",
     "cmd_sources",
     "cmd_synthesis",
     "cmd_summary",
@@ -796,66 +808,294 @@ def _matrix_input(args: argparse.Namespace, settings: Settings) -> list[Paper]:
     raise ConfigurationError("give identifiers, --query TEXT, or --from-file FILE")
 
 
-# ---------------------------------------------------------------------- #
-# label (triage state)
-# ---------------------------------------------------------------------- #
+def _read_batch(path: str) -> list[dict[str, Any]]:
+    """Read a batch file: a JSON array/object, or one JSON object per line."""
+    try:
+        text = sys.stdin.read() if path == "-" else Path(path).read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ConfigurationError(f"cannot read {path}: {exc}") from exc
+    if not text.strip():
+        return []
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        payload = []
+        for lineno, line in enumerate(text.splitlines(), start=1):
+            if not line.strip():
+                continue
+            try:
+                payload.append(json.loads(line))
+            except json.JSONDecodeError as exc:
+                raise ConfigurationError(
+                    f"{path}:{lineno}: invalid JSON in batch: {exc}"
+                ) from exc
+    if isinstance(payload, Mapping):
+        if isinstance(payload.get("updates"), list):
+            payload = payload["updates"]
+        else:
+            payload = [payload]
+    if not isinstance(payload, list):
+        raise ConfigurationError(
+            f"{path}: a batch must be a JSON array or one object per line"
+        )
+    items: list[dict[str, Any]] = []
+    for item in payload:
+        if not isinstance(item, Mapping):
+            raise ConfigurationError(
+                f"{path}: every batch entry must be an object, got "
+                f"{type(item).__name__}"
+            )
+        items.append(dict(item))
+    return items
 
 
-def cmd_label(args: argparse.Namespace, settings: Settings) -> int:
-    """Attach screening labels / notes to a saved result set and rewrite it.
+def _print_label_result(result: Mapping[str, Any], path: str) -> None:
+    summary = result.get("summary") or {}
+    print(
+        _table(
+            ["LABEL", "COUNT"],
+            [[key, str(value)] for key, value in summary.items()],
+        )
+    )
+    print(f"{result.get('labelled', 0)} record(s) labelled in {path}", file=sys.stderr)
+    unmatched = result.get("unmatched") or []
+    if unmatched:
+        print("unmatched ids: " + ", ".join(str(item) for item in unmatched), file=sys.stderr)
+    invalid = result.get("invalid") or []
+    for item in invalid:
+        print(
+            f"update {item.get('index')} ({item.get('id')}): {item.get('error')}",
+            file=sys.stderr,
+        )
 
-    This is the Week 3 lab's triage step as a file operation: read a result
-    set, set ``core``/``general``/``excluded`` (optionally with a reason) and
-    append reading notes, then write the file back.  Screening decisions
-    therefore live in the exported JSON, not only in someone's head.
 
-    With ``--workspace`` the canonical workspace set is rewritten through its
-    own store, so the log/meta stay consistent with the labels.
+def cmd_screen(args: argparse.Namespace, settings: Settings) -> int:
+    """Set screening labels / append notes, one record or a whole batch.
+
+    The verb is ``screen``; the stored field is ``label``.  ``label`` remains
+    a parser alias so existing scripts keep working.  With ``--batch`` the
+    file is read once and applied in one locked write, which is what makes
+    screening a few hundred records practical.
     """
     workspace_path = getattr(args, "workspace", None)
-    if bool(workspace_path) == bool(args.from_file):
+    from_file = getattr(args, "from_file", None)
+    if bool(workspace_path) == bool(from_file):
         raise ConfigurationError("give exactly one of a FILE or --workspace DIR")
+    if workspace_path and getattr(args, "out", None):
+        raise ConfigurationError("--out is for a standalone FILE, not --workspace")
+
+    batch = getattr(args, "batch", None)
+    if batch:
+        if args.set or args.note or args.reason or args.id:
+            raise ConfigurationError(
+                "--batch cannot be combined with --set/--note/--reason/--id"
+            )
+        raw_updates = _read_batch(batch)
+        if not raw_updates:
+            raise ConfigurationError(f"{batch} holds no label updates")
+    else:
+        if not args.set and not args.note:
+            raise ConfigurationError("give --set and/or --note, or --batch FILE")
+        raw_updates = [
+            LabelUpdate(
+                ids=tuple(args.id or ()),
+                label=args.set,
+                note=args.note,
+                reason=args.reason or "",
+                all_records=not args.id,
+            )
+        ]
+
+    strict = not getattr(args, "lenient", False)
 
     if workspace_path:
         workspace = Workspace(workspace_path, settings=settings)
-        result = workspace.label(
-            ids=args.id,
-            set_label=args.set,
-            note=args.note,
-            reason=args.reason or "",
-        )
-        print(
-            _table(
-                ["LABEL", "COUNT"],
-                [[key, str(value)] for key, value in result["summary"].items()],
-            )
-        )
-        print(
-            f"{result['labelled']} record(s) labelled in {workspace.path}",
-            file=sys.stderr,
-        )
+        result = workspace.label_many(raw_updates, strict=strict)
+        _print_label_result(result, str(workspace.path))
+        if not result["labelled"] and (result["unmatched"] or result["invalid"]):
+            return 1
         return 0
 
-    papers = _load_result_file(args.from_file)
+    papers = _load_result_file(from_file)  # type: ignore[arg-type]
     if not papers:
-        raise ConfigurationError(f"{args.from_file} holds no records")
-
-    wanted = {p for p in (args.id or [])}
-    for paper in papers:
-        if wanted and paper.primary_id() not in wanted and paper.title not in wanted:
-            continue
-        if args.set:
-            paper.label_as(args.set, args.reason or "")
-        if args.note:
-            paper.note(args.note)
-
-    from .. import export as _export
-
-    _export.to_json(papers, args.out or args.from_file)
-    print(
-        f"{len(papers)} records written to {args.out or args.from_file}",
-        file=sys.stderr,
+        raise ConfigurationError(f"{from_file} holds no records")
+    outcome = apply_updates(papers, raw_updates, strict=strict)
+    target = str(args.out or from_file)
+    export.to_json(papers, target)
+    summary = matrix.screen_summary(papers)
+    _print_label_result(
+        {
+            "labelled": outcome.labelled,
+            "total": len(papers),
+            "summary": summary,
+            "unmatched": outcome.unmatched,
+            "invalid": outcome.invalid,
+        },
+        str(target),
     )
+    if not outcome.labelled and (outcome.unmatched or outcome.invalid):
+        return 1
+    return 0
+
+
+#: Compatibility name: the command was ``label`` before the verb was aligned
+#: with the "screen" step in the workflow.
+cmd_label = cmd_screen
+
+
+def _prescreen_criteria(args: argparse.Namespace) -> PrescreenCriteria:
+    raw_types = getattr(args, "exclude_types", None)
+    raw_rules = getattr(args, "rules", None)
+    return PrescreenCriteria(
+        year_from=getattr(args, "year_from", None),
+        year_to=getattr(args, "year_to", None),
+        exclude_types=(
+            tuple(item.strip() for item in raw_types.split(",") if item.strip())
+            if raw_types
+            else PrescreenCriteria().exclude_types
+        ),
+        require_abstract=not getattr(args, "allow_no_abstract", False),
+        require_title=not getattr(args, "allow_no_title", False),
+        rules=(
+            tuple(item.strip() for item in raw_rules.split(",") if item.strip())
+            if raw_rules
+            else None
+        ),
+    )
+
+
+def cmd_prescreen(args: argparse.Namespace, settings: Settings) -> int:
+    """Flag obvious exclusions by rule; apply only with ``--apply``."""
+    workspace_path = getattr(args, "workspace", None)
+    from_file = getattr(args, "from_file", None)
+    if bool(workspace_path) == bool(from_file):
+        raise ConfigurationError("give exactly one of a FILE or --workspace DIR")
+    criteria = _prescreen_criteria(args)
+
+    if workspace_path:
+        workspace = Workspace(workspace_path, settings=settings)
+        payload = workspace.prescreen(
+            apply=getattr(args, "apply", False),
+            criteria=criteria,
+            limit=getattr(args, "limit", 50),
+        )
+    else:
+        papers = _load_result_file(from_file)  # type: ignore[arg-type]
+        report = prescreen(papers, criteria)
+        applied = 0
+        if getattr(args, "apply", False):
+            for hit in report.hits:
+                if hit.paper.triage_label() != "unreviewed":
+                    continue
+                hit.paper.label_as("excluded", "pre-screen: " + hit.reason)
+                applied += 1
+            export.to_json(papers, str(args.out or from_file))
+        payload = report.as_dict(limit=getattr(args, "limit", 50))
+        payload["applied"] = applied
+        payload["summary"] = matrix.screen_summary(papers)
+
+    if getattr(args, "format", "table") == "json":
+        text = json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+    else:
+        rows = [[rule, str(count)] for rule, count in payload["by_rule"].items()]
+        text = _table(["RULE", "FLAGGED"], rows) + "\n"
+        for hit in payload["candidates"]:
+            text += (
+                f"{hit['id'] or '-'}  {hit.get('year') or '-'}  "
+                f"{hit['title']}  [{'; '.join(hit['reasons'])}]\n"
+            )
+        if payload["truncated"]:
+            text += f"... {payload['truncated']} more\n"
+        text += (
+            f"considered {payload['considered']}, flagged {payload['flagged']}, "
+            f"applied {payload['applied']}\n"
+        )
+    out = getattr(args, "out", None)
+    # With --apply and a standalone file, --out is the rewritten result set;
+    # writing the report there too would overwrite the JSON.  In every other
+    # case --out is the report itself.
+    report_to_out = bool(out) and (
+        bool(workspace_path) or not getattr(args, "apply", False)
+    )
+    if report_to_out and out is not None:
+        Path(out).expanduser().write_text(text, encoding="utf-8")
+        print(f"wrote {out}", file=sys.stderr)
+    else:
+        print(text, end="")
+    return 0
+
+
+def cmd_snowball(args: argparse.Namespace, settings: Settings) -> int:
+    """Expand the core set through references/citations, ranked by link count."""
+    workspace_path = getattr(args, "workspace", None)
+    if not workspace_path:
+        raise ConfigurationError("snowball needs --workspace DIR (a core set and a log)")
+    workspace = Workspace(workspace_path, settings=settings)
+    payload = workspace.expand(
+        direction=getattr(args, "direction", "both"),
+        ids=getattr(args, "id", None),
+        core_label=getattr(args, "core_label", "core"),
+        limit=getattr(args, "limit", None),
+        min_links=getattr(args, "min_links", 1),
+        max_results=getattr(args, "max_results", 25),
+        persist=not getattr(args, "no_persist", False),
+    )
+    text = (
+        json.dumps(payload, indent=2, ensure_ascii=False) + "\n"
+        if getattr(args, "format", "table") == "json"
+        else _table(
+            ["LINKS", "YEAR", "ID", "TITLE"],
+            [
+                [
+                    str(item["links"]),
+                    str(item.get("year") or "-"),
+                    item.get("id") or "-",
+                    item["title"],
+                ]
+                for item in payload["candidates"]
+            ],
+        )
+        + "\n"
+        + (
+            f"core {payload['core_count']}, fetched {payload['fetched']}, "
+            f"new {payload['new']}, known {payload['known']}, "
+            f"shown {payload['returned']}"
+            + (f", {payload['truncated']} more" if payload["truncated"] else "")
+            + "\n"
+        )
+    )
+    out = getattr(args, "out", None)
+    if out:
+        Path(out).expanduser().write_text(
+            json.dumps(payload, indent=2, ensure_ascii=False) + "\n",
+            encoding="utf-8",
+        )
+        print(f"wrote {out}", file=sys.stderr)
+    else:
+        print(text, end="")
+    return 0
+
+
+def cmd_prisma(args: argparse.Namespace, settings: Settings) -> int:
+    """Print the PRISMA-style flow derived from the workspace log and labels."""
+    workspace_path = getattr(args, "path", None)
+    if not workspace_path:
+        raise ConfigurationError("prisma needs a workspace PATH")
+    workspace = Workspace(workspace_path, settings=settings, create=False)
+    if not workspace.exists():
+        raise ConfigurationError(f"{workspace.path} is not a workspace")
+    report = workspace.prisma()
+    text = (
+        json.dumps(report, indent=2, ensure_ascii=False) + "\n"
+        if getattr(args, "format", "json") == "json"
+        else render_prisma_markdown(report)
+    )
+    out = getattr(args, "out", None)
+    if out:
+        Path(out).expanduser().write_text(text, encoding="utf-8")
+        print(f"wrote {out}", file=sys.stderr)
+    else:
+        print(text, end="")
     return 0
 
 

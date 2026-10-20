@@ -102,10 +102,31 @@ from .models import (
     Author,
     MergeOutcome,
     Paper,
+    PaperIndex,
     dedupe,
     merge,
     merge_sets,
     sort_papers,
+)
+from .prisma import prisma_report, render_prisma_markdown
+from .screening import (
+    DEFAULT_EXCLUDED_TYPES,
+    DEFAULT_PRESCREEN_RULES,
+    LabelUpdate,
+    PrescreenCriteria,
+    PrescreenHit,
+    PrescreenReport,
+    UpdateOutcome,
+    apply_updates,
+    index_papers,
+    prescreen,
+)
+from .snowball import (
+    DIRECTIONS,
+    Candidate,
+    SnowballResult,
+    normalize_direction,
+    expand as snowball_expand,
 )
 from .relevance import (
     DEFAULT_MIN_SCORE,
@@ -164,6 +185,7 @@ __all__ = [
     # records
     "Author",
     "Paper",
+    "PaperIndex",
     # configuration
     "ENV_KEYS",
     "Settings",
@@ -185,6 +207,26 @@ __all__ = [
     "search",
     "sort_papers",
     "source_names",
+    # screening primitives
+    "DEFAULT_EXCLUDED_TYPES",
+    "DEFAULT_PRESCREEN_RULES",
+    "LabelUpdate",
+    "PrescreenCriteria",
+    "PrescreenHit",
+    "PrescreenReport",
+    "UpdateOutcome",
+    "apply_updates",
+    "index_papers",
+    "prescreen",
+    # snowballing
+    "DIRECTIONS",
+    "Candidate",
+    "SnowballResult",
+    "normalize_direction",
+    "snowball_expand",
+    # PRISMA
+    "prisma_report",
+    "render_prisma_markdown",
     # workspace (state + provenance)
     "LOG_JSONL",
     "LOG_MD",

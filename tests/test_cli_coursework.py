@@ -5,6 +5,7 @@ Everything runs against saved result files and stubbed sources — no network.
 
 from __future__ import annotations
 
+import io
 import json
 from pathlib import Path
 
@@ -12,7 +13,10 @@ import pytest
 
 from researcher_python import cli, export
 from researcher_python.cli import main
+from researcher_python.config import Settings
 from researcher_python.models import Author, Paper
+from researcher_python.pipeline import PipelineResult
+from researcher_python.workspace import SearchParams, Workspace
 
 
 def _paper(doi: str, year: int, title: str, **kwargs) -> Paper:
@@ -135,6 +139,129 @@ class TestLabelCommand:
         assert main(["label", str(empty), "--set", "core"]) == 2
 
 
+class TestScreenBatchAndPrescreen:
+    def test_batch_applies_many_updates_in_one_call(self, results_file, tmp_path) -> None:
+        batch = tmp_path / "batch.json"
+        batch.write_text(
+            json.dumps(
+                [
+                    {"id": "10.1/a", "label": "core"},
+                    {"id": "10.1/b", "label": "general", "note": "re-read"},
+                    {"id": "10.1/c", "label": "excluded", "reason": "off topic"},
+                ]
+            )
+        )
+        assert main(["screen", str(results_file), "--batch", str(batch)]) == 0
+        papers = {p.doi: p for p in export.from_json(str(results_file))}
+        assert papers["10.1/a"].triage_label() == "core"
+        assert papers["10.1/b"].triage_label() == "general"
+        assert "re-read" in papers["10.1/b"].notes
+        assert papers["10.1/c"].exclusion_reason == "off topic"
+
+    def test_batch_reads_jsonl_from_stdin(
+        self, results_file, monkeypatch
+    ) -> None:
+        text = (
+            '{"id": "10.1/a", "label": "core"}\n'
+            '{"id": "10.1/b", "label": "excluded", "reason": "old"}\n'
+        )
+        monkeypatch.setattr("sys.stdin", io.StringIO(text))
+        assert main(["screen", str(results_file), "--batch", "-"]) == 0
+        labels = {p.doi: p.triage_label() for p in export.from_json(str(results_file))}
+        assert labels["10.1/b"] == "excluded"
+
+    def test_strict_batch_refuses_a_bad_label(self, results_file, tmp_path) -> None:
+        batch = tmp_path / "batch.json"
+        batch.write_text(
+            json.dumps(
+                [
+                    {"id": "10.1/a", "label": "core"},
+                    {"id": "10.1/b", "label": "maybe"},
+                ]
+            )
+        )
+        assert main(["screen", str(results_file), "--batch", str(batch)]) == 2
+        # Nothing was written.
+        papers = {p.doi: p for p in export.from_json(str(results_file))}
+        assert papers["10.1/a"].triage_label() == "core"  # fixture value
+
+    def test_lenient_batch_applies_the_valid_entries(
+        self, results_file, tmp_path, capsys
+    ) -> None:
+        batch = tmp_path / "batch.json"
+        batch.write_text(
+            json.dumps(
+                [
+                    {"id": "10.1/a", "label": "general"},
+                    {"id": "10.1/b", "label": "maybe"},
+                ]
+            )
+        )
+        assert main(
+            ["screen", str(results_file), "--batch", str(batch), "--lenient"]
+        ) == 0
+        papers = {p.doi: p for p in export.from_json(str(results_file))}
+        assert papers["10.1/a"].triage_label() == "general"
+        assert "unknown triage label" in capsys.readouterr().err
+
+    def test_prescreen_reports_without_writing(self, tmp_path, capsys) -> None:
+        raw = tmp_path / "raw.json"
+        papers = [
+            _paper("10.1/a", 2020, "No abstract"),
+            _paper("10.1/b", 2020, "Has abstract", abstract="text"),
+        ]
+        export.to_json(papers, raw)
+        assert main(["prescreen", str(raw)]) == 0
+        assert "flagged 1" in capsys.readouterr().out
+        assert all(p.triage_label() == "unreviewed" for p in export.from_json(str(raw)))
+
+    def test_prescreen_apply_writes_excluded(self, tmp_path) -> None:
+        raw = tmp_path / "raw.json"
+        export.to_json([_paper("10.1/a", 2020, "No abstract")], raw)
+        assert main(["prescreen", str(raw), "--apply"]) == 0
+        paper = export.from_json(str(raw))[0]
+        assert paper.triage_label() == "excluded"
+        assert paper.exclusion_reason.startswith("pre-screen:")
+
+    def test_prescreen_year_window(self, tmp_path, capsys) -> None:
+        raw = tmp_path / "raw.json"
+        export.to_json(
+            [
+                _paper("10.1/old", 2010, "Old", abstract="a"),
+                _paper("10.1/new", 2022, "New", abstract="a"),
+            ],
+            raw,
+        )
+        assert main(["prescreen", str(raw), "--year-from", "2019"]) == 0
+        assert "outside year window" in capsys.readouterr().out
+
+
+class TestPrismaCommand:
+    def test_prints_the_flow_from_a_workspace(self, tmp_path, capsys) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        ws.record_search(
+            SearchParams(query="seed", sources=("openalex",), round=1),
+            PipelineResult(
+                papers=[_paper("10.1/a", 2020, "A"), _paper("10.1/b", 2021, "B")],
+                by_source={"openalex": 2},
+            ),
+        )
+        ws.label(ids=["10.1/a"], set_label="core")
+        assert main(["prisma", str(ws.path)]) == 0
+        out = capsys.readouterr().out
+        assert "Records identified | 2" in out
+        assert "Included (core + general) | 1" in out
+
+    def test_json_form(self, tmp_path, capsys) -> None:
+        ws = Workspace(tmp_path / "ws", settings=Settings())
+        assert main(["prisma", str(ws.path), "--format", "json"]) == 0
+        payload = json.loads(capsys.readouterr().out)
+        assert payload["deduped"] == 0
+
+    def test_a_missing_workspace_is_a_usage_error(self, tmp_path) -> None:
+        assert main(["prisma", str(tmp_path / "absent")]) == 2
+
+
 class TestBibliographyCommand:
     def test_defaults_to_harvard_from_a_file(self, results_file, capsys) -> None:
         assert main(["bibliography", "--from-file", str(results_file)]) == 0
@@ -190,8 +317,10 @@ class TestParserRegistration:
         "get": "10.1/a",
         "extract": "a.pdf",
         "label": "results.json",
+        "screen": "results.json",
         "download": "10.1/a",
         "workspace": ["status", "ws"],
+        "prisma": "ws",
     }
 
     def test_every_subcommand_has_a_handler_and_parses(self) -> None:
@@ -207,6 +336,7 @@ class TestParserRegistration:
     def test_help_lists_the_new_subcommands(self) -> None:
         text = cli.build_parser().format_help()
         for name in ("bibliography", "matrix", "synthesis", "summary", "label",
+                     "screen", "prescreen", "snowball", "prisma",
                      "references", "citations", "web-search", "extract"):
             assert name in text
 

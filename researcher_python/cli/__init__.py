@@ -42,8 +42,12 @@ from .commands import (
     cmd_info,
     cmd_label,
     cmd_matrix,
+    cmd_prescreen,
+    cmd_prisma,
     cmd_references,
+    cmd_screen,
     cmd_search,
+    cmd_snowball,
     cmd_sources,
     cmd_synthesis,
     cmd_summary,
@@ -186,25 +190,117 @@ def build_parser() -> argparse.ArgumentParser:
         "--source", dest="source", metavar="NAME", default=None, help="use only this source"
     )
 
-    label = sub.add_parser(
-        "label", help="set screening labels / notes on a saved result set"
+    screen = sub.add_parser(
+        "screen",
+        aliases=["label"],
+        help="screen: set labels / notes, one record or a whole batch",
     )
-    label.add_argument(
+    screen.add_argument(
         "from_file", nargs="?", metavar="FILE", help="a saved .json result set"
     )
     _add_workspace_flag(
-        label, "label the canonical set in DIR instead of a standalone file"
+        screen, "screen the canonical set in DIR instead of a standalone file"
     )
-    label.add_argument("--set", dest="set", default=None,
-                       choices=("unreviewed", "core", "general", "excluded"),
-                       help="screening label to apply")
-    label.add_argument("--reason", default="", metavar="TEXT",
-                       help="why (kept only with --set excluded)")
-    label.add_argument("--note", default="", metavar="TEXT", help="append a dated note")
-    label.add_argument("--id", action="append", default=None, metavar="ID",
-                       help="only this record (repeatable; default: all)")
-    label.add_argument("--out", metavar="FILE", default=None,
-                       help="write elsewhere (default: rewrite in place)")
+    screen.add_argument("--set", dest="set", default=None,
+                        choices=("unreviewed", "core", "general", "excluded"),
+                        help="screening label to apply")
+    screen.add_argument("--reason", default="", metavar="TEXT",
+                        help="why (kept only with --set excluded)")
+    screen.add_argument("--note", default="", metavar="TEXT", help="append a dated note")
+    screen.add_argument("--id", action="append", default=None, metavar="ID",
+                        help="only this record (repeatable; default: all)")
+    screen.add_argument(
+        "--batch",
+        metavar="FILE",
+        default=None,
+        help="apply many updates from a JSON array / JSONL file ('-' = stdin); "
+        "each entry is {id|ids, label, reason, note}",
+    )
+    screen.add_argument(
+        "--lenient",
+        action="store_true",
+        help="apply valid batch updates and report invalid ones instead of "
+        "refusing the whole batch",
+    )
+    screen.add_argument("--out", metavar="FILE", default=None,
+                        help="write elsewhere (default: rewrite in place)")
+
+    prescreen_parser = sub.add_parser(
+        "prescreen", help="flag obvious exclusions by rule (report by default)"
+    )
+    prescreen_parser.add_argument(
+        "from_file", nargs="?", metavar="FILE", help="a saved .json result set"
+    )
+    _add_workspace_flag(
+        prescreen_parser, "pre-screen the canonical set in DIR"
+    )
+    prescreen_parser.add_argument("--year-from", dest="year_from", type=int, default=None)
+    prescreen_parser.add_argument("--year-to", dest="year_to", type=int, default=None)
+    prescreen_parser.add_argument(
+        "--exclude-types",
+        dest="exclude_types",
+        default=None,
+        metavar="A,B",
+        help="work types to exclude (default: grant,standard,dataset)",
+    )
+    prescreen_parser.add_argument(
+        "--rules",
+        default=None,
+        metavar="A,B",
+        help="subset of no-title,no-abstract,type,outside-year",
+    )
+    prescreen_parser.add_argument(
+        "--allow-no-abstract", dest="allow_no_abstract", action="store_true",
+        help="do not flag records with no abstract",
+    )
+    prescreen_parser.add_argument(
+        "--allow-no-title", dest="allow_no_title", action="store_true",
+        help="do not flag records with no title",
+    )
+    prescreen_parser.add_argument(
+        "--apply", action="store_true", help="write the flagged records as excluded"
+    )
+    prescreen_parser.add_argument("--limit", type=int, default=50, metavar="N",
+                                  help="max candidates to print (default: 50)")
+    prescreen_parser.add_argument("--format", choices=("table", "json"), default="table")
+    prescreen_parser.add_argument(
+        "--out",
+        metavar="FILE",
+        default=None,
+        help="write the rewritten result set (with --apply) or the report "
+        "(without); on a workspace it always writes the report",
+    )
+
+    snowball_parser = sub.add_parser(
+        "snowball", help="expand a core set through references/citations"
+    )
+    _add_workspace_flag(snowball_parser, "workspace whose core set to expand")
+    snowball_parser.add_argument(
+        "--direction", default="both", choices=("references", "citations", "both"),
+        help="which edge to follow (default: both)",
+    )
+    snowball_parser.add_argument("--id", action="append", default=None, metavar="ID",
+                                 help="core id (repeatable; default: records labelled core)")
+    snowball_parser.add_argument("--core-label", dest="core_label", default="core",
+                                 choices=("core", "general"),
+                                 help="label that defines the core set (default: core)")
+    snowball_parser.add_argument("--min-links", dest="min_links", type=int, default=1,
+                                 metavar="N", help="require N core papers to link a candidate")
+    snowball_parser.add_argument("--limit", type=int, default=None, metavar="N",
+                                 help="per-core cap passed to each citation source")
+    snowball_parser.add_argument("--max-results", dest="max_results", type=int, default=25,
+                                 metavar="N", help="max candidates to show (default: 25)")
+    snowball_parser.add_argument("--no-persist", dest="no_persist", action="store_true",
+                                 help="preview only; do not merge into the workspace")
+    snowball_parser.add_argument("--format", choices=("table", "json"), default="table")
+    snowball_parser.add_argument("--out", metavar="FILE", default=None)
+
+    prisma_parser = sub.add_parser(
+        "prisma", help="PRISMA-style flow counts from the log and labels"
+    )
+    prisma_parser.add_argument("path", help="workspace directory")
+    prisma_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
+    prisma_parser.add_argument("--out", metavar="FILE", default=None)
 
     _add_citation_parsers(sub)
     _add_bibliography_parser(sub)
@@ -450,7 +546,11 @@ _HANDLERS: dict[str, Handler] = {
     "summary": cmd_summary,
     "web-search": cmd_web_search,
     "extract": cmd_extract,
+    "screen": cmd_screen,
     "label": cmd_label,
+    "prescreen": cmd_prescreen,
+    "snowball": cmd_snowball,
+    "prisma": cmd_prisma,
 }
 
 

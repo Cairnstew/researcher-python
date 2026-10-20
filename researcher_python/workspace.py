@@ -55,8 +55,17 @@ from typing import Any
 from . import export, pipeline
 from . import __version__
 from .config import Settings, load_settings
-from .errors import ConfigurationError, WorkspaceError
+from .errors import ConfigurationError, ResearcherError, SourceError, WorkspaceError
 from .models import TRIAGE_LABELS, MergeOutcome, Paper, merge_sets
+from .prisma import prisma_report
+from .screening import (
+    LabelUpdate,
+    PrescreenCriteria,
+    apply_updates,
+    index_papers,
+    prescreen,
+)
+from .snowball import expand as snowball_expand
 from .sources import DEFAULT_SOURCES
 
 try:  # POSIX (Linux/macOS).  A no-op elsewhere; the package targets both.
@@ -1098,8 +1107,16 @@ class Workspace:
         result: pipeline.PipelineResult,
         *,
         duration_ms: float = 0.0,
+        extra: Mapping[str, Any] | None = None,
     ) -> WorkspaceSearch:
-        """Merge ``result`` into the workspace and append one provenance row."""
+        """Merge ``result`` into the workspace and append one provenance row.
+
+        ``extra`` carries retrieval metadata that is not a search parameter —
+        a snowball expansion records its direction, core set and link counts
+        here.  It is merged into both the log entry and the result envelope,
+        so a later reader sees why the records arrived without the search log
+        growing another column.
+        """
         if isinstance(params, Mapping):
             params = SearchParams.from_dict(params)
         if not isinstance(params, SearchParams):
@@ -1127,6 +1144,8 @@ class Workspace:
                 search_id, now, params, result, outcome, len(screened),
                 duration_ms,
             )
+            if extra:
+                entry.update(dict(extra))
 
             meta = self._meta or {}
             results_meta = {
@@ -1143,6 +1162,9 @@ class Workspace:
                 "terms": entry["outcome"]["terms"],
                 "updated_at": now,
             }
+            if extra:
+                results_meta.update(dict(extra))
+
             last_search = {
                 "id": search_id,
                 "at": now,
@@ -1297,39 +1319,27 @@ class Workspace:
 
     # -- screening -------------------------------------------------------
 
-    def label(
+    def label_many(
         self,
+        updates: Iterable[LabelUpdate | Mapping[str, Any]],
         *,
-        ids: Iterable[str] | None = None,
-        set_label: str | None = None,
-        note: str = "",
-        reason: str = "",
+        strict: bool = True,
     ) -> dict[str, Any]:
-        """Apply a triage label / note to the canonical set, in place."""
-        if set_label is None and not note:
-            raise ConfigurationError("give set_label and/or note to record")
-        if set_label is not None and set_label not in TRIAGE_LABELS:
-            raise ConfigurationError(
-                f"unknown triage label {set_label!r}; expected one of "
-                f"{', '.join(TRIAGE_LABELS)}"
-            )
+        """Apply many screening decisions in one locked read/write cycle.
+
+        The batch is validated before any record is touched (see
+        :func:`researcher_python.screening.apply_updates`), so a typo in the
+        last update cannot leave the set half-labelled.  ``strict=False``
+        applies the valid updates and reports the bad ones, which is what a
+        long agent-driven batch usually wants.
+        """
+        prepared = list(updates)
+        if not prepared:
+            raise ConfigurationError("no label updates to apply")
 
         with self._locked():
             self.load()
-            wanted = set(ids or [])
-            touched = 0
-            for paper in self._papers or []:
-                if (
-                    wanted
-                    and paper.primary_id() not in wanted
-                    and paper.title not in wanted
-                ):
-                    continue
-                if set_label is not None:
-                    paper.label_as(set_label, reason)
-                if note:
-                    paper.note(note)
-                touched += 1
+            outcome = apply_updates(self._papers or [], prepared, strict=strict)
 
             now = _now()
             meta = self._meta or {}
@@ -1338,24 +1348,282 @@ class Workspace:
             meta["counts"] = counts
             meta["last_label"] = {
                 "at": now,
-                "labelled": touched,
-                "set": set_label,
+                "labelled": outcome.labelled,
+                "set": outcome.labels[0] if len(outcome.labels) == 1 else None,
+                "labels": list(outcome.labels),
+                "unmatched": list(outcome.unmatched),
             }
             results_meta = dict(self._results_meta)
             results_meta.update(
-                {"action": "label", "labelled": touched, "updated_at": now}
+                {
+                    "action": "label",
+                    "labelled": outcome.labelled,
+                    "updated_at": now,
+                }
             )
             self._write_results(self._papers or [], results_meta)
             self._write_meta(meta)
             self._meta = meta
 
         return {
-            "labelled": touched,
+            "labelled": outcome.labelled,
             "total": len(self._papers or []),
             "summary": _counts(self._papers or []),
+            "unmatched": list(outcome.unmatched),
+            "invalid": list(outcome.invalid),
+            "labels": list(outcome.labels),
         }
 
+    def screen(
+        self,
+        *,
+        ids: Iterable[str] | None = None,
+        set_label: str | None = None,
+        note: str = "",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """The verb form of :meth:`label` — screening sets the stored label."""
+        return self.label(ids=ids, set_label=set_label, note=note, reason=reason)
+
+    def label(
+        self,
+        *,
+        ids: Iterable[str] | None = None,
+        set_label: str | None = None,
+        note: str = "",
+        reason: str = "",
+    ) -> dict[str, Any]:
+        """Apply one triage label / note to the canonical set, in place.
+
+        Kept as the single-record convenience path (and the compatibility
+        name); :meth:`label_many` is the batch primitive underneath it.
+        """
+        if set_label is None and not note:
+            raise ConfigurationError("give set_label and/or note to record")
+        if set_label is not None and set_label not in TRIAGE_LABELS:
+            raise ConfigurationError(
+                f"unknown triage label {set_label!r}; expected one of "
+                f"{', '.join(TRIAGE_LABELS)}"
+            )
+
+        wanted = list(ids or [])
+        update = LabelUpdate(
+            ids=tuple(wanted),
+            label=set_label,
+            note=note,
+            reason=reason,
+            all_records=not wanted,
+        )
+        result = self.label_many([update])
+        return {
+            "labelled": result["labelled"],
+            "total": result["total"],
+            "summary": result["summary"],
+        }
+
+    def prescreen(
+        self,
+        *,
+        apply: bool = False,
+        criteria: PrescreenCriteria | None = None,
+        limit: int | None = None,
+    ) -> dict[str, Any]:
+        """Flag obvious exclusions, optionally writing them as ``excluded``.
+
+        ``apply=False`` (the default) is a report: rules are heuristics, and
+        "no abstract" is a false positive for exactly the grey literature a
+        review often needs.  Applying writes only to records still marked
+        ``unreviewed`` and prefixes the reason with ``pre-screen:`` so the
+        PRISMA report can separate a rule exclusion from a human one.
+        """
+        with self._locked():
+            self.load()
+            report = prescreen(self._papers or [], criteria)
+            applied = 0
+            if apply and report.hits:
+                reason_prefix = "pre-screen: "
+                for hit in report.hits:
+                    if hit.paper.triage_label() != "unreviewed":
+                        continue
+                    hit.paper.label_as("excluded", reason_prefix + hit.reason)
+                    applied += 1
+                now = _now()
+                meta = self._meta or {}
+                meta["updated_at"] = now
+                meta["counts"] = _counts(self._papers or [])
+                meta["last_label"] = {
+                    "at": now,
+                    "labelled": applied,
+                    "set": "excluded",
+                    "labels": ["excluded"],
+                    "unmatched": [],
+                    "prescreen": True,
+                }
+                results_meta = dict(self._results_meta)
+                results_meta.update(
+                    {
+                        "action": "prescreen",
+                        "labelled": applied,
+                        "updated_at": now,
+                    }
+                )
+                self._write_results(self._papers or [], results_meta)
+                self._write_meta(meta)
+                self._meta = meta
+            payload = report.as_dict(limit=limit)
+            payload["applied"] = applied
+            payload["summary"] = _counts(self._papers or [])
+            return payload
+
+    def expand(
+        self,
+        *,
+        direction: str = "both",
+        ids: Iterable[str] | None = None,
+        core_label: str = "core",
+        limit: int | None = None,
+        sources: list[str] | tuple[str, ...] | None = None,
+        min_links: int = 1,
+        max_results: int | None = None,
+        persist: bool = True,
+        settings: Settings | None = None,
+    ) -> dict[str, Any]:
+        """Snowball the core set through the citation graph.
+
+        The core set is the explicit ``ids`` or, more usually, every record
+        labelled ``core``.  Network I/O runs *outside* the workspace lock: a
+        30-paper expansion is dozens of API calls, and holding the flock for
+        that long would block every other writer.
+
+        ``persist=True`` merges the candidates through
+        :meth:`record_search`, so the expansion gets a provenance row
+        (``channel="snowball"``) and the crash-journal guarantees a search
+        already has.  The log row records the direction, core set and bounds —
+        enough to reproduce the query — while the per-record ``linked_by``
+        evidence is returned to the caller rather than copied into the log.
+        """
+        settings = settings if settings is not None else self.settings
+        if core_label not in TRIAGE_LABELS:
+            raise ConfigurationError(
+                f"unknown core label {core_label!r}; expected one of "
+                f"{', '.join(TRIAGE_LABELS)}"
+            )
+
+        # Snapshot the core/known sets, then release the lock for the network.
+        with self._locked():
+            self.load()
+            papers = list(self._papers or [])
+            if ids is not None:
+                wanted = [ids] if isinstance(ids, str) else list(ids)
+                index = index_papers(papers)
+                selected: list[Paper] = []
+                missing: list[str] = []
+                seen: set[int] = set()
+                for identifier in wanted:
+                    matches = index.get(str(identifier), ())
+                    if not matches:
+                        missing.append(str(identifier))
+                        continue
+                    for paper in matches:
+                        if id(paper) not in seen:
+                            seen.add(id(paper))
+                            selected.append(paper)
+                if missing:
+                    raise ConfigurationError(
+                        "no record for core id(s): " + ", ".join(missing)
+                    )
+            else:
+                selected = [
+                    paper
+                    for paper in papers
+                    if paper.triage_label() == core_label
+                ]
+            if not selected:
+                raise ConfigurationError(
+                    "no core records to expand; label some records 'core' "
+                    "first, or pass ids=[...]"
+                )
+            known = papers
+            round_number = self.round
+
+        result = snowball_expand(
+            selected,
+            direction=direction,
+            known=known,
+            limit=limit,
+            sources=sources,
+            min_links=min_links,
+            settings=settings,
+        )
+
+        payload = result.as_dict(min_links=min_links, limit=max_results)
+        payload["round"] = round_number
+        payload["persisted"] = False
+
+        if persist:
+            from .citation import CITATION_SOURCES
+
+            queried_sources = tuple(result.by_source) or CITATION_SOURCES
+            errors: dict[str, ResearcherError] = {}
+            for core_id, per_source in result.errors.items():
+                for source, message in per_source.items():
+                    errors[f"{core_id}:{source}"] = SourceError(source, message)
+            pipeline_result = pipeline.PipelineResult(
+                papers=[item.paper for item in result.candidates],
+                by_source=dict(result.by_source),
+                errors=errors,
+                terms=[],
+                dropped=0,
+            )
+            params = SearchParams(
+                query=f"expand:{result.direction}",
+                sources=queried_sources,
+                max_results=limit,
+                sort="relevance",
+                field="any",
+                round=round_number,
+                channel="snowball",
+            )
+            outcome = self.record_search(
+                params,
+                pipeline_result,
+                extra={
+                    "expansion": {
+                        "direction": result.direction,
+                        "core": list(result.core),
+                        "min_links": min_links,
+                        "skipped": list(result.skipped),
+                        "truncated_sources": dict(result.truncated),
+                    }
+                },
+            )
+            payload.update(
+                {
+                    "persisted": True,
+                    "search_id": outcome.search_id,
+                    "new": outcome.new,
+                    "seen": outcome.seen,
+                    "total": outcome.total,
+                    "workspace": str(self.path),
+                }
+            )
+
+        return payload
+
     # -- reporting -------------------------------------------------------
+
+    def prisma(self) -> dict[str, Any]:
+        """PRISMA-style counts derived from the log and the labels.
+
+        Pure work lives in :func:`researcher_python.prisma.prisma_report`; this
+        method only supplies the workspace's records, log and provenance.
+        """
+        self.load()
+        return prisma_report(
+            self.papers,
+            self.log_entries(),
+            provenance=self.meta.get("provenance") or {},
+        )
 
     def status(self) -> dict[str, Any]:
         """A JSON-able status card — paths, counts, round and provenance."""
