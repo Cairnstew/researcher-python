@@ -17,7 +17,8 @@ from dataclasses import dataclass, field
 from datetime import date
 from typing import Any
 
-from .ids import normalize_title
+from .ids import arxiv_id_from_doi, normalize_doi, normalize_title
+from .work_types import normalize_work_type
 
 #: ``relevance`` is source-faithful: it keeps each source's own ranking (see
 #: :func:`sort_papers`).  ``score`` is the *local* cross-source ranking from
@@ -49,6 +50,11 @@ _STRING_FIELDS = (
     "publisher",
     "language",
     "work_type",
+    #: Where the current ``citation_count`` came from: a source name, or
+    #: ``openalex`` when the missing-count backfill supplied it.  Empty when the
+    #: count is unknown, so a mixed-provenance count is visible rather than
+    #: looking like every other number.
+    "citation_count_source",
     "oa_status",
     "license",
     # -- reader-owned triage state (never populated by a source) --------
@@ -111,6 +117,99 @@ class Author:
 
 
 @dataclass(slots=True)
+class PaperVersion:
+    """One version of a work: a preprint, an accepted manuscript, or the
+    published record.
+
+    ``Paper`` keeps the bibliographic view a citation needs (usually the
+    published version) while ``versions`` preserves the other identities, so a
+    preprint is not lost when its journal version is merged in.  Version
+    entries are *evidence*, not guesses: each one comes from a shared arXiv id,
+    a Crossref relation, an OpenAlex location, or a Semantic Scholar external
+    id.  A title+year match alone never creates one.
+    """
+
+    kind: str = "unknown"  # preprint | accepted | published | unknown
+    doi: str = ""
+    arxiv_id: str = ""
+    pmid: str = ""
+    pmcid: str = ""
+    openalex_id: str = ""
+    semantic_scholar_id: str = ""
+    url: str = ""
+    pdf_url: str = ""
+    venue: str = ""
+    year: int | None = None
+    published: str = ""
+    work_type: str = ""
+    source: str = ""
+    #: The assertion that produced this entry: ``is-preprint-of``,
+    #: ``is-version-of``, ``location``, ``external-id``, ...
+    relation: str = ""
+    asserted_by: str = ""
+    is_published: bool | None = None
+
+    def key(self) -> tuple[str, str]:
+        """Stable identity for deduplicating version entries."""
+        if self.doi:
+            return ("doi", normalize_doi(self.doi))
+        if self.arxiv_id:
+            return ("arxiv", self.arxiv_id)
+        if self.openalex_id:
+            return ("openalex", self.openalex_id)
+        if self.semantic_scholar_id:
+            return ("semantic_scholar", self.semantic_scholar_id)
+        return (self.kind, "|".join((self.source, self.venue, str(self.year or ""))))
+
+    def to_dict(self) -> dict[str, Any]:
+        return {
+            "kind": self.kind,
+            "doi": self.doi,
+            "arxiv_id": self.arxiv_id,
+            "pmid": self.pmid,
+            "pmcid": self.pmcid,
+            "openalex_id": self.openalex_id,
+            "semantic_scholar_id": self.semantic_scholar_id,
+            "url": self.url,
+            "pdf_url": self.pdf_url,
+            "venue": self.venue,
+            "year": self.year,
+            "published": self.published,
+            "work_type": self.work_type,
+            "source": self.source,
+            "relation": self.relation,
+            "asserted_by": self.asserted_by,
+            "is_published": self.is_published,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Mapping[str, Any]) -> "PaperVersion":
+        return cls(
+            kind=str(data.get("kind") or "unknown"),
+            doi=normalize_doi(data.get("doi")),
+            arxiv_id=str(data.get("arxiv_id") or ""),
+            pmid=str(data.get("pmid") or ""),
+            pmcid=str(data.get("pmcid") or ""),
+            openalex_id=str(data.get("openalex_id") or ""),
+            semantic_scholar_id=str(data.get("semantic_scholar_id") or ""),
+            url=str(data.get("url") or ""),
+            pdf_url=str(data.get("pdf_url") or ""),
+            venue=str(data.get("venue") or ""),
+            year=_as_int(data.get("year")),
+            published=str(data.get("published") or ""),
+            work_type=str(data.get("work_type") or ""),
+            source=str(data.get("source") or ""),
+            relation=str(data.get("relation") or ""),
+            asserted_by=str(data.get("asserted_by") or ""),
+            is_published=(
+                bool(data["is_published"])
+                if isinstance(data.get("is_published"), bool)
+                else None
+            ),
+        )
+
+
+@dataclass(slots=True)
 class Paper:
     """One scholarly work, normalised across every source that knows it."""
 
@@ -144,6 +243,8 @@ class Paper:
     # -- metrics / access -----------------------------------------------
     citation_count: int | None = None
     reference_count: int | None = None
+    #: Which source supplied :attr:`citation_count` (empty when unknown).
+    citation_count_source: str = ""
     is_open_access: bool = False
     oa_status: str = ""
     license: str = ""
@@ -155,6 +256,12 @@ class Paper:
     #: through :meth:`to_dict`, so a scored result file stays auditable: the
     #: score that justified a screening decision is saved beside it.
     relevance: float | None = None
+
+    #: Explicit versions of this work: a preprint, accepted manuscript or the
+    #: published record, each with the identifier that proves it.  Usually one
+    #: entry (the canonical record) or two (preprint + published).  Populated
+    #: only from explicit links, never from a title guess.
+    versions: list[PaperVersion] = field(default_factory=list)
 
     # -- reader-owned triage state ---------------------------------------
     # Not populated by any source: these carry the *reader's* judgement, and
@@ -220,18 +327,43 @@ class Paper:
 
         Two records sharing *any* of these describe the same work.  Title is
         deliberately excluded — see :func:`title_key`.
+
+        An arXiv DOI (``10.48550/arXiv.X``) contributes the bare ``arxiv:X``
+        key too, and every explicit :attr:`versions` entry contributes its own
+        ids.  That is what lets a published record merge with a preprint that
+        carries only the arXiv id, and what keeps a workspace round merging a
+        record whose canonical DOI was promoted.
         """
         keys: list[str] = []
-        for prefix, value in (
-            ("doi:", self.doi),
-            ("arxiv:", self.arxiv_id),
-            ("pmid:", self.pmid),
-            ("pmcid:", self.pmcid),
-            ("isbn:", self.isbn),
-        ):
-            if value and f"{prefix}{value}" not in keys:
-                keys.append(f"{prefix}{value}")
+
+        def add(prefix: str, value: str | None) -> None:
+            text = str(value or "").strip()
+            if text and f"{prefix}{text}" not in keys:
+                keys.append(f"{prefix}{text}")
+
+        add("doi:", normalize_doi(self.doi))
+        add("arxiv:", self.arxiv_id)
+        add("arxiv:", arxiv_id_from_doi(self.doi))
+        add("pmid:", self.pmid)
+        add("pmcid:", self.pmcid)
+        add("isbn:", self.isbn)
+        for version in self.versions:
+            add("doi:", normalize_doi(version.doi))
+            add("arxiv:", arxiv_id_from_doi(version.doi))
+            add("arxiv:", version.arxiv_id)
+            add("pmid:", version.pmid)
+            add("pmcid:", version.pmcid)
         return keys
+
+    def preferred_version(self) -> PaperVersion | None:
+        """The highest-ranked explicit version, or ``None`` if none is known."""
+        if not self.versions:
+            return None
+        return max(self.versions, key=_version_rank)
+
+    def as_version(self, kind: str | None = None) -> PaperVersion:
+        """A :class:`PaperVersion` snapshot of this record."""
+        return _paper_version(self, kind)
 
     def title_key(self) -> str | None:
         """Folded title, used as a *fallback* match when no id lines up."""
@@ -252,6 +384,7 @@ class Paper:
             "reference_count": self.reference_count,
             "is_open_access": self.is_open_access,
             "relevance": self.relevance,
+            "versions": [v.to_dict() for v in self.versions],
         }
 
     @classmethod
@@ -283,6 +416,13 @@ class Paper:
         paper.relevance = _as_float(data.get("relevance"))
         paper.categories = [str(x) for x in (data.get("categories") or [])]
         paper.keywords = [str(x) for x in (data.get("keywords") or [])]
+        raw_versions = data.get("versions") or []
+        if isinstance(raw_versions, Iterable):
+            paper.versions = [
+                v if isinstance(v, PaperVersion) else PaperVersion.from_dict(v)
+                for v in raw_versions
+                if isinstance(v, (PaperVersion, Mapping))
+            ]
         return paper
 
     def copy(self) -> Paper:
@@ -293,6 +433,155 @@ class Paper:
 # ---------------------------------------------------------------------- #
 # Merging
 # ---------------------------------------------------------------------- #
+
+_VERSION_RANKS = {"unknown": 0, "preprint": 1, "accepted": 2, "published": 3}
+
+_PUBLISHED_KINDS = {
+    "article",
+    "review",
+    "book",
+    "book-chapter",
+    "proceedings-article",
+    "thesis",
+    "report",
+    "editorial",
+    "letter",
+    "erratum",
+    "peer-review",
+    "paratext",
+    "other",
+}
+
+#: Fields the published version owns when a version pair is linked.  ``url``
+#: and ``pdf_url`` are deliberately absent: a preprint PDF is often the only
+#: open copy, so the generic fill-gaps merge keeps it.
+_BIBLIOGRAPHIC_FIELDS = (
+    "title",
+    "doi",
+    "year",
+    "published",
+    "venue",
+    "volume",
+    "issue",
+    "pages",
+    "publisher",
+    "language",
+    "work_type",
+)
+
+
+def _version_rank(version: PaperVersion) -> tuple[int, int, str]:
+    return (
+        _VERSION_RANKS.get(version.kind, 0),
+        version.year or 0,
+        version.doi or version.arxiv_id or version.openalex_id or "",
+    )
+
+
+def _version_kind(paper: Paper) -> str:
+    """Coarse version kind from a record's own type, without guessing."""
+    canonical = normalize_work_type(paper.work_type)
+    if canonical == "preprint":
+        return "preprint"
+    if canonical in _PUBLISHED_KINDS:
+        return "published"
+    return "unknown"
+
+
+def _paper_version(paper: Paper, kind: str | None = None) -> PaperVersion:
+    return PaperVersion(
+        kind=kind or _version_kind(paper),
+        doi=normalize_doi(paper.doi),
+        arxiv_id=paper.arxiv_id,
+        pmid=paper.pmid,
+        pmcid=paper.pmcid,
+        openalex_id=paper.id_for("openalex"),
+        semantic_scholar_id=paper.id_for("semantic_scholar"),
+        url=paper.url,
+        pdf_url=paper.pdf_url,
+        venue=paper.venue,
+        year=paper.year,
+        published=paper.published,
+        work_type=paper.work_type,
+        source=paper.source,
+    )
+
+
+def _version_refs(paper: Paper) -> set[str]:
+    """Identifiers asserted by explicit version entries (never the own ids)."""
+    refs: set[str] = set()
+    for version in paper.versions:
+        if version.doi:
+            refs.add(f"doi:{normalize_doi(version.doi)}")
+            derived = arxiv_id_from_doi(version.doi)
+            if derived:
+                refs.add(f"arxiv:{derived}")
+        if version.arxiv_id:
+            refs.add(f"arxiv:{version.arxiv_id}")
+        if version.pmid:
+            refs.add(f"pmid:{version.pmid}")
+    return refs
+
+
+def _own_keys(paper: Paper) -> set[str]:
+    return set(paper.merge_keys())
+
+
+def _is_version_pair(target: Paper, other: Paper) -> bool:
+    """True when the two records describe different versions of one work.
+
+    Evidence is explicit: one side names the other in ``versions`` (a Crossref
+    relation, an OpenAlex location, a Semantic Scholar external id), or one is
+    a preprint and the other a published/accepted record.  Same-kind
+    duplicates are ordinary merges, not versions.
+    """
+    if _version_refs(target) & _own_keys(other):
+        return True
+    if _version_refs(other) & _own_keys(target):
+        return True
+    a, b = _version_kind(target), _version_kind(other)
+    return {a, b} == {"preprint", "published"} or {a, b} == {"preprint", "accepted"}
+
+
+def _union_versions(
+    target: Paper, other: Paper, *, pair: bool
+) -> None:
+    """Deduplicate version entries, adding a self entry when a pair is linked."""
+    entries = list(target.versions) + list(other.versions)
+    if pair:
+        entries = [_paper_version(target), _paper_version(other), *entries]
+    ordered: list[PaperVersion] = []
+    seen: set[tuple[str, str]] = set()
+    for version in entries:
+        key = version.key()
+        if key in seen:
+            continue
+        seen.add(key)
+        ordered.append(version)
+    target.versions = ordered
+
+
+def _promote_published(target: Paper, other: Paper) -> None:
+    """Move the higher-ranked version's bibliographic fields onto ``target``.
+
+    Reader-owned state, source provenance, result order and the preprint's
+    open PDF are untouched; the displaced values remain in ``versions``.  This
+    is what makes a citation render the journal record while the preprint is
+    still discoverable by its arXiv id.
+    """
+    if _version_rank(_paper_version(other)) <= _version_rank(_paper_version(target)):
+        return
+    for name in _BIBLIOGRAPHIC_FIELDS:
+        value = getattr(other, name)
+        if value:
+            setattr(target, name, value)
+    if other.doi and normalize_doi(other.doi):
+        target.ids["doi"] = normalize_doi(other.doi)
+    for key in ("openalex", "semantic_scholar", "pubmed", "pmc"):
+        value = other.ids.get(key)
+        if value:
+            target.ids.setdefault(key, value)
+
 
 
 def _union(dest: list[str], extra: Iterable[str]) -> None:
@@ -345,6 +634,11 @@ def merge(target: Paper, other: Paper) -> Paper:
         if value:
             target.ids.setdefault(key, value)
 
+    pair = _is_version_pair(target, other)
+    _union_versions(target, other, pair=pair)
+    if pair:
+        _promote_published(target, other)
+
     for name in _STRING_FIELDS:
         if not getattr(target, name):
             setattr(target, name, getattr(other, name) or "")
@@ -356,8 +650,12 @@ def merge(target: Paper, other: Paper) -> Paper:
         mine, theirs = getattr(target, name), getattr(other, name)
         if mine is None:
             setattr(target, name, theirs)
-        elif theirs is not None:
-            setattr(target, name, max(mine, theirs))
+            if name == "citation_count" and theirs is not None:
+                target.citation_count_source = other.citation_count_source
+        elif theirs is not None and theirs > mine:
+            setattr(target, name, theirs)
+            if name == "citation_count":
+                target.citation_count_source = other.citation_count_source
 
     target.is_open_access = target.is_open_access or other.is_open_access
 
@@ -372,6 +670,12 @@ def _years_compatible(a: Paper, b: Paper) -> bool:
     if a.year is None or b.year is None:
         return True
     return a.year == b.year
+
+
+def _cross_version(a: Paper, b: Paper) -> bool:
+    """True when two records have known, different version kinds."""
+    ka, kb = _version_kind(a), _version_kind(b)
+    return ka != "unknown" and kb != "unknown" and ka != kb
 
 
 def _index_title(index: dict[str, list[Paper]], key: str | None, onto: Paper) -> None:
@@ -434,8 +738,15 @@ class PaperIndex:
         title = paper.title_key()
         if title:
             for candidate in self.by_title.get(title, ()):
-                if _years_compatible(candidate, paper):
-                    return candidate
+                if not _years_compatible(candidate, paper):
+                    continue
+                # A preprint and its published version often share a title but
+                # differ in year.  Once both are known versions, only explicit
+                # evidence (a shared id/relation) may merge them; a title guess
+                # silently loses a version.
+                if _cross_version(candidate, paper):
+                    continue
+                return candidate
         return None
 
 
@@ -591,6 +902,7 @@ __all__ = [
     "MergeOutcome",
     "Paper",
     "PaperIndex",
+    "PaperVersion",
     "dedupe",
     "merge",
     "merge_sets",

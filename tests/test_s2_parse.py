@@ -412,3 +412,27 @@ def test_429_with_garbage_retry_after_maps_to_none(
     with pytest.raises(RateLimitError) as excinfo:
         source.get("10.1/throttled")
     assert excinfo.value.retry_after is None
+
+
+def test_publication_types_fill_work_type_and_the_search_field() -> None:
+    from researcher_python.sources.base import SearchFilters
+
+    record = load("s2_paper.json")
+    record["publicationTypes"] = ["JournalArticle"]
+    assert parse_s2_paper(record).work_type == "JournalArticle"
+
+    source = make_source()
+    seen: list[dict[str, Any]] = []
+
+    def fake_get(path, params):
+        seen.append(dict(params))
+        return {"data": []}
+
+    source._get = fake_get  # type: ignore[method-assign]
+    source.search(
+        "agents",
+        limit=5,
+        filters=SearchFilters(types=("article",), exclude_types=()),
+    )
+    assert seen[0]["publicationTypes"] == "JournalArticle"
+    assert "publicationTypes" in seen[0]["fields"]

@@ -76,6 +76,11 @@ class Settings:
     #: retrying; adapters themselves never loop (D8).
     retries: int = 1
 
+    #: Backfill missing citation counts/abstracts from OpenAlex after a merge.
+    #: Only runs when OpenAlex was one of the requested sources (``--source``
+    #: stays authoritative); ``RESEARCHER_ENRICH=0`` disables it.
+    enrich_citations: bool = True
+
     def __post_init__(self) -> None:
         # Frozen dataclass: validate on construction so a bad value is refused
         # whether it came from the environment or a direct keyword.
@@ -149,10 +154,12 @@ ENV_KEYS = {
     "RESEARCHER_MAX_RESULTS": "max_results",
     "RESEARCHER_RETRIES": "retries",
     "RESEARCHER_TIMEOUT": "timeout",
+    "RESEARCHER_ENRICH": "enrich_citations",
 }
 
 _INT_FIELDS = frozenset({"max_results", "retries"})
 _FLOAT_FIELDS = frozenset({"timeout"})
+_BOOL_FIELDS = frozenset({"enrich_citations"})
 _PATH_FIELDS = frozenset({"output_dir", "home", "workspace", "env_file"})
 
 
@@ -180,7 +187,9 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
         raw = env.get(env_name)
         if raw is None or raw == "":
             continue
-        if field_name in _INT_FIELDS:
+        if field_name in _BOOL_FIELDS:
+            values[field_name] = _as_bool(raw, env_name)
+        elif field_name in _INT_FIELDS:
             try:
                 values[field_name] = int(raw)
             except ValueError as exc:
@@ -202,6 +211,17 @@ def load_settings(env: Mapping[str, str] | None = None) -> Settings:
     if "log_level" in values:
         values["log_level"] = str(values["log_level"]).upper()
     return Settings(**values)  # type: ignore[arg-type]
+
+
+def _as_bool(raw: str, env_name: str) -> bool:
+    text = str(raw).strip().casefold()
+    if text in {"1", "true", "yes", "on"}:
+        return True
+    if text in {"0", "false", "no", "off"}:
+        return False
+    raise ConfigurationError(
+        f"{env_name} must be a boolean (1/0, true/false, yes/no), got {raw!r}"
+    )
 
 
 def _load_dotenv(

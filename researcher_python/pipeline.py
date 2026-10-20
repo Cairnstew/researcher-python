@@ -36,7 +36,7 @@ from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass, field
 
-from . import _retry, relevance
+from . import _retry, enrich as enrichment, relevance
 from .config import Settings
 from .errors import (
     ConfigurationError,
@@ -47,6 +47,7 @@ from .errors import (
 )
 from .ids import is_arxiv_id, is_doi, is_isbn, is_pmid
 from .models import SORT_MODES, Paper, dedupe, sort_papers
+from .work_types import normalize_work_type
 from .sources import DEFAULT_SOURCES, create_source, source_names
 from .sources.base import SearchFilters
 
@@ -71,15 +72,26 @@ class PipelineResult:
     errors: dict[str, ResearcherError] = field(default_factory=dict)
     #: Source name -> raw results it returned *before* dedupe (0 on failure).
     by_source: dict[str, int] = field(default_factory=dict)
-    #: Records dropped by a ``min_score`` floor.  Reported so a thin result set
-    #: is visibly *filtered* rather than mysteriously small.
+    #: Records dropped by a ``min_score``/``top_ratio``/``min_citations`` floor.
+    #: Reported so a thin result set is visibly *filtered* rather than
+    #: mysteriously small.
     dropped: int = 0
+    #: Records removed by the work-type policy, and a per-canonical-type
+    #: breakdown.  Kept separate from ``dropped`` (which is the relevance and
+    #: citation floor) so a PRISMA flow can reconcile identified -> kept without
+    #: another silent gap.
+    dropped_types: int = 0
+    dropped_type_counts: dict[str, int] = field(default_factory=dict)
     #: The query terms each score was computed against (see
     #: :func:`researcher_python.relevance.query_terms`).
     terms: list[str] = field(default_factory=list)
     #: Why the result is empty, when the cause is guessable (a field-scoped
     #: AND match, or a citation floor).  Empty when there is nothing to explain.
     hint: str = ""
+    #: Work records that carry more than one explicit version after the merge.
+    versions_linked: int = 0
+    #: Missing-count/abstract backfill report, or ``None`` when it was disabled.
+    enrichment: enrichment.EnrichmentReport | None = None
 
 
 # ---------------------------------------------------------------------- #
@@ -101,6 +113,9 @@ def search(
     year_from: int | None = None,
     year_to: int | None = None,
     min_citations: int | None = None,
+    work_types: Sequence[str] | str | None = None,
+    exclude_types: Sequence[str] | str | None = None,
+    enrich: bool | None = None,
 ) -> PipelineResult:
     """Query several sources concurrently and return one merged result.
 
@@ -113,6 +128,18 @@ def search(
     ``field``/``year_from``/``year_to`` build the :class:`SearchFilters`;
     passing them *as well as* an explicit ``filters`` is a caller mistake and
     raises rather than silently letting one win.
+
+    ``work_types``/``exclude_types`` are the work-type policy.  With neither,
+    searches drop grants and standards (:data:`work_types.
+    DEFAULT_SEARCH_EXCLUDE_TYPES`); an explicit ``work_types`` allow-list
+    replaces that default, so ``work_types=["grant"]`` can find grants.
+    ``exclude_types=()`` disables the default exclusions explicitly.  A record
+    whose type is unknown is kept — see :func:`work_types.normalize_work_type`.
+
+    ``enrich`` controls the OpenAlex missing-count/abstract backfill.  ``None``
+    (the default) uses :attr:`Settings.enrich_citations`; it only runs when
+    OpenAlex participated in the search, so an explicit ``sources=["pubmed"]``
+    is not silently widened.  ``False`` disables it.
 
     ``min_citations`` drops records with fewer citations than the floor.  It is
     a crude *standing* proxy — a decade-old paper with 40 citations and a
@@ -147,7 +174,9 @@ def search(
         raise ConfigurationError(
             f"unknown sort {sort!r}; expected one of {', '.join(SORT_MODES)}"
         )
-    filters = _resolve_filters(filters, field, year_from, year_to)
+    filters = _resolve_filters(
+        filters, field, year_from, year_to, work_types, exclude_types
+    )
     if min_citations is not None and (
         not isinstance(min_citations, int)
         or isinstance(min_citations, bool)
@@ -171,6 +200,7 @@ def search(
         return result
 
     groups: dict[str, list[Paper]] = {}
+    instances: dict[str, object] = {}
     workers = max(1, min(_MAX_WORKERS, len(names)))
     with ThreadPoolExecutor(max_workers=workers) as pool:
         futures = {
@@ -179,17 +209,48 @@ def search(
         }
         for name in names:
             try:
-                papers, error = futures[name].result()
+                papers, error, source = futures[name].result()
             except Exception as exc:  # pragma: no cover - _search_one never raises
-                papers, error = [], SourceError(
+                papers, error, source = [], SourceError(
                     name, f"{type(exc).__name__}: {exc}", cause=exc
-                )
+                ), None
             groups[name] = papers
+            if source is not None:
+                instances[name] = source
             result.by_source[name] = len(papers)
             if error is not None:
                 result.errors[name] = error
 
     merged = dedupe(_round_robin([groups[name] for name in names]))
+
+    # Backfill missing metadata.  The same OpenAlex fetch harvests explicit
+    # version locations, so a second dedupe pass is required: two records that
+    # looked unrelated before enrichment may now share an arXiv DOI/location.
+    run_enrich = settings.enrich_citations if enrich is None else bool(enrich)
+    if run_enrich:
+        source = instances.get("openalex")
+        if source is None and enrich is True:
+            # ``--enrich`` explicitly asks for the backfill even when OpenAlex
+            # was not one of the requested search sources.
+            try:
+                source = create_source("openalex", settings)
+            except ResearcherError as exc:
+                result.enrichment = enrichment.EnrichmentReport(
+                    skipped_reason="could not construct openalex",
+                    errors=[f"{type(exc).__name__}: {exc}"],
+                )
+                source = None
+        if result.enrichment is None:
+            result.enrichment = enrichment.enrich_papers(merged, source)
+        if result.enrichment.versions_added:
+            merged = dedupe(merged)
+    result.versions_linked = sum(1 for p in merged if len(p.versions) > 1)
+
+    # The authoritative type filter runs after the merge: an adapter may not
+    # know a type, and a merge can fill it from another source.  Counted apart
+    # from the relevance floors so "identified" and "kept" reconcile.
+    merged, result.dropped_type_counts = _filter_types(merged, filters)
+    result.dropped_types = sum(result.dropped_type_counts.values())
 
     # Score every merged record against the query the caller actually typed.
     # Done unconditionally (it is pure string work) so a result file always
@@ -205,6 +266,24 @@ def search(
     result.papers = sort_papers(kept, sort, query=query if sort == "score" else None)
     result.hint = _zero_result_hint(result, query, filters, min_citations)
     return result
+
+
+def _filter_types(
+    papers: Iterable[Paper], filters: SearchFilters | None
+) -> tuple[list[Paper], dict[str, int]]:
+    """Split on the work-type policy, counting each removed canonical type."""
+    items = list(papers)
+    if filters is None or not (filters.types or filters.exclude_types):
+        return items, {}
+    kept: list[Paper] = []
+    counts: dict[str, int] = {}
+    for paper in items:
+        if filters.type_ok(paper.work_type):
+            kept.append(paper)
+            continue
+        canonical = normalize_work_type(paper.work_type) or "(unknown)"
+        counts[canonical] = counts.get(canonical, 0) + 1
+    return kept, counts
 
 
 def _filter_min_citations(
@@ -252,6 +331,12 @@ def _zero_result_hint(
             f"— a restrictive match returns fewer hits but more exact ones "
             f"(see lab01's title-match vs relaxed-search trade-off)."
         )
+    if result.dropped_types:
+        return (
+            "0 kept: every retrieved record was removed by the work-type "
+            "policy (default excludes are grant and standard; pass an explicit "
+            "allow-list to keep one of them)."
+        )
     if min_citations is not None:
         return (
             f"0 kept: every retrieved record had fewer than {min_citations} "
@@ -269,6 +354,8 @@ def _resolve_filters(
     field: str | None,
     year_from: int | None,
     year_to: int | None,
+    work_types: Sequence[str] | str | None = None,
+    exclude_types: Sequence[str] | str | None = None,
 ) -> SearchFilters | None:
     """Build a :class:`SearchFilters` from the convenience keywords.
 
@@ -277,20 +364,44 @@ def _resolve_filters(
     (that kind of silent precedence is how a search stops being reproducible).
     """
     if filters is not None:
-        if field is not None or year_from is not None or year_to is not None:
+        if (
+            field is not None
+            or year_from is not None
+            or year_to is not None
+            or work_types is not None
+            or exclude_types is not None
+        ):
             raise ConfigurationError(
                 "pass either filters=SearchFilters(...) or the convenience "
-                "keywords (field=/year_from=/year_to=), not both"
+                "keywords (field=/year_from=/year_to=/work_types=/"
+                "exclude_types=), not both"
             )
         return filters
-    if field is None and year_from is None and year_to is None:
-        return None
     try:
+        # Even with no keywords, construct one: SearchFilters carries the
+        # default grant/standard exclusion.  A bare None would silently opt a
+        # library caller out of the search policy the CLI and MCP apply.
         return SearchFilters(
-            year_from=year_from, year_to=year_to, field=field or "any"
+            year_from=year_from,
+            year_to=year_to,
+            field=field or "any",
+            types=tuple(_as_type_tuple(work_types)),
+            exclude_types=(
+                None
+                if exclude_types is None
+                else tuple(_as_type_tuple(exclude_types))
+            ),
         )
     except ValueError as exc:
         raise ConfigurationError(str(exc)) from exc
+
+
+def _as_type_tuple(values: Sequence[str] | str | None) -> tuple[str, ...]:
+    if values is None:
+        return ()
+    if isinstance(values, str):
+        return (values,)
+    return tuple(values)
 
 
 def _score_fields(filters: SearchFilters | None) -> list[str] | None:
@@ -319,18 +430,23 @@ def _search_one(
     limit: int,
     settings: Settings,
     filters: SearchFilters | None = None,
-) -> tuple[list[Paper], ResearcherError | None]:
-    """Build and exercise one source; never raises, always reports."""
+) -> tuple[list[Paper], ResearcherError | None, object | None]:
+    """Build and exercise one source; never raises, always reports.
+
+    The constructed source is returned too: the pipeline keeps the OpenAlex
+    instance for the enrichment pass rather than paying for a second session
+    and rate gate.
+    """
     try:
         source = create_source(name, settings)
     except ResearcherError as exc:
         # ConfigurationError (missing email), SourceUnavailableError, ...
-        return [], exc
+        return [], exc, None
     except Exception as exc:
-        return [], SourceError(name, f"{type(exc).__name__}: {exc}", cause=exc)
+        return [], SourceError(name, f"{type(exc).__name__}: {exc}", cause=exc), None
 
     if not source.supports("search"):
-        return [], UnsupportedOperation(f"source {name!r} has no 'search'")
+        return [], UnsupportedOperation(f"source {name!r} has no 'search'"), source
 
     try:
         return (
@@ -340,11 +456,12 @@ def _search_one(
                 )
             ),
             None,
+            source,
         )
     except ResearcherError as exc:
-        return [], exc
+        return [], exc, source
     except Exception as exc:
-        return [], SourceError(name, f"{type(exc).__name__}: {exc}", cause=exc)
+        return [], SourceError(name, f"{type(exc).__name__}: {exc}", cause=exc), source
 
 
 def _with_retry(operation, settings: Settings):

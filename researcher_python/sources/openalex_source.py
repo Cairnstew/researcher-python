@@ -30,8 +30,17 @@ from urllib.parse import quote
 
 from ..config import Settings
 from ..errors import NotFoundError, RateLimitError, SourceError
-from ..ids import is_arxiv_id, is_doi, is_pmid, normalize_arxiv_id, normalize_doi, normalize_orcid, normalize_pmid
-from ..models import Author, Paper
+from ..ids import (
+    arxiv_id_from_doi,
+    is_arxiv_id,
+    is_doi,
+    is_pmid,
+    normalize_arxiv_id,
+    normalize_doi,
+    normalize_orcid,
+    normalize_pmid,
+)
+from ..models import Author, Paper, PaperVersion
 from .base import (
     Capabilities,
     SearchFilters,
@@ -56,6 +65,29 @@ _MAX_BACKOFF = 30.0
 #: Backoff used when the server sends no usable ``Retry-After``.
 _DEFAULT_RETRY_SLEEP = 2.0
 _ID_RE = re.compile(r"https?://openalex\.org/(W\d+)$")
+
+#: Canonical work type -> OpenAlex ``type`` value.  Only an allow-list is
+#: pushed down: OpenAlex's ``!`` negation is combined with ``|`` as OR, so
+#: ``type:!grant|!standard`` would mean "everything" rather than "neither".
+_OPENALEX_TYPES = {
+    "article": "article",
+    "review": "review",
+    "preprint": "preprint",
+    "book": "book",
+    "book-chapter": "book-chapter",
+    "proceedings-article": "proceedings-article",
+    "thesis": "dissertation",
+    "report": "report",
+    "dataset": "dataset",
+    "grant": "grant",
+    "standard": "standard",
+    "editorial": "editorial",
+    "letter": "letter",
+    "erratum": "erratum",
+    "peer-review": "peer-review",
+    "paratext": "paratext",
+    "other": "other",
+}
 
 
 def _as_mapping(value: Any) -> dict[str, Any]:
@@ -121,7 +153,67 @@ def _arxiv_from_locations(work: Mapping[str, Any]) -> str:
             candidate = normalize_arxiv_id(location.get(key))
             if candidate and is_arxiv_id(candidate):
                 return candidate
+        doi = normalize_doi(location.get("doi") or location.get("landing_page_url"))
+        candidate = arxiv_id_from_doi(doi)
+        if candidate:
+            return candidate
     return ""
+
+
+def _location_versions(work: Mapping[str, Any], own_doi: str) -> list[PaperVersion]:
+    """Explicit versions OpenAlex knows from a work's ``locations``.
+
+    A published record routinely lists the arXiv repository copy (sometimes
+    via the arXiv DOI), which is the explicit link a title/year heuristic
+    cannot provide.  Locations are capped and deduplicated: one real record had
+    68 of them.
+    """
+    out: list[PaperVersion] = []
+    seen: set[tuple[str, str]] = set()
+    for location in work.get("locations") or ():
+        if not isinstance(location, Mapping) or len(out) >= 20:
+            continue
+        raw_type = squash_text(location.get("raw_type")).casefold()
+        version_label = squash_text(location.get("version")).casefold()
+        doi = normalize_doi(location.get("doi") or location.get("landing_page_url"))
+        arxiv = normalize_arxiv_id(location.get("landing_page_url"))
+        if not is_arxiv_id(arxiv):
+            arxiv = normalize_arxiv_id(location.get("pdf_url"))
+        if not is_arxiv_id(arxiv):
+            arxiv = ""
+        arxiv = arxiv or arxiv_id_from_doi(doi)
+        if doi and doi == own_doi and not arxiv:
+            continue
+        if not doi and not arxiv:
+            continue
+        if raw_type == "posted-content" or "submittedversion" in version_label:
+            kind = "preprint"
+        elif "acceptedversion" in version_label:
+            kind = "accepted"
+        elif location.get("is_published") or "publishedversion" in version_label:
+            kind = "published"
+        else:
+            kind = "unknown"
+        entry = PaperVersion(
+            kind=kind,
+            doi=doi,
+            arxiv_id=arxiv,
+            url=squash_text(location.get("landing_page_url")),
+            pdf_url=squash_text(location.get("pdf_url")),
+            source="openalex",
+            relation="location",
+            asserted_by="openalex",
+            is_published=(
+                bool(location["is_published"])
+                if isinstance(location.get("is_published"), bool)
+                else None
+            ),
+        )
+        if entry.key() in seen:
+            continue
+        seen.add(entry.key())
+        out.append(entry)
+    return out
 
 
 def parse_openalex_work(work: Mapping[str, Any]) -> Paper:
@@ -192,7 +284,9 @@ def parse_openalex_work(work: Mapping[str, Any]) -> Paper:
         sources=["openalex"],
         ids={"openalex": openalex_id} if openalex_id else {},
         doi=doi,
-        arxiv_id=_arxiv_from_locations(work),
+        arxiv_id=(
+            arxiv_id_from_doi(doi) or _arxiv_from_locations(work)
+        ),
         pmid=pmid,
         pmcid=pmcid,
         url=squash_text(primary_location.get("landing_page_url"))
@@ -216,12 +310,14 @@ def parse_openalex_work(work: Mapping[str, Any]) -> Paper:
         citation_count=work.get("cited_by_count")
         if isinstance(work.get("cited_by_count"), int)
         else None,
+        citation_count_source="openalex",
         reference_count=work.get("referenced_works_count")
         if isinstance(work.get("referenced_works_count"), int)
         else None,
         is_open_access=bool(open_access.get("is_oa")),
         oa_status=squash_text(open_access.get("oa_status")),
         license=squash_text(best_oa.get("license")),
+        versions=_location_versions(work, doi),
     )
     if openalex_id:
         paper.ids.setdefault("openalex", openalex_id)
@@ -236,7 +332,9 @@ class OpenAlexSource(Source):
     """OpenAlex works API."""
 
     name = "openalex"
-    capabilities = Capabilities(search=True, get=True, references=True, citations=True, pdf=True)
+    capabilities = Capabilities(
+        search=True, get=True, references=True, citations=True, pdf=True, enrich=True
+    )
 
     def __init__(self, settings: Settings | None = None, *, timeout: float = 30.0, **_: object) -> None:
         super().__init__(settings)
@@ -410,6 +508,18 @@ class OpenAlexSource(Source):
                 params["filter"] = ",".join(
                     x for x in (params.get("filter", ""), f"to_publication_date:{filters.year_to}-12-31") if x
                 )
+            if filters.types:
+                mapped = [_OPENALEX_TYPES.get(t) for t in filters.types]
+                # If any requested canonical type has no OpenAlex spelling, the
+                # server-side filter would drop valid records; leave it to the
+                # local apply_filters() instead.
+                if all(mapped):
+                    params["filter"] = ",".join(
+                        x for x in (
+                            params.get("filter", ""),
+                            f"type:{'|'.join(mapped)}",
+                        ) if x
+                    )
 
         collected: list[Paper] = []
         page = 1
@@ -428,6 +538,27 @@ class OpenAlexSource(Source):
     def get(self, key: str) -> Paper:
         self.require_support("get")
         return parse_openalex_work(self._fetch(key))
+
+    def works_by_dois(self, dois: Iterable[str]) -> list[Paper]:
+        """Resolve many DOIs in one filtered request (OpenAlex OR syntax).
+
+        OpenAlex's ``filter=doi:a|b|c`` is a true OR, so the missing-count
+        backfill spends one request per :data:`_FILTER_CHUNK` records instead
+        of one per record.  Values containing the filter separators are skipped
+        rather than corrupting the expression; a DOI the API does not know
+        simply does not come back.
+        """
+        self.require_support("enrich")
+        cleaned = []
+        for value in dois:
+            doi = normalize_doi(value)
+            if doi and "|" not in doi and "," not in doi and doi not in cleaned:
+                cleaned.append(doi)
+        out: list[Paper] = []
+        for start in range(0, len(cleaned), _FILTER_CHUNK):
+            chunk = cleaned[start:start + _FILTER_CHUNK]
+            out.extend(self._filter(f"doi:{'|'.join(chunk)}", len(chunk)))
+        return out
 
     def references(self, paper: Paper) -> list[Paper]:
         self.require_support("references")

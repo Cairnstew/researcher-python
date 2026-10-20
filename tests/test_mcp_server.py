@@ -182,6 +182,31 @@ def test_search_returns_merged_records_and_diagnostics(fakes):
     assert payload["all_sources_failed"] is False
 
 
+def test_search_type_policy_is_applied_and_echoed(fakes):
+    SEARCHES["types"] = [
+        _known("Paper", doi="10.1/a", work_type="article"),
+        _known("Grant", doi="10.1/g", work_type="grant"),
+    ]
+    payload = mcp_mod._tool_search("types", sources=["openalex"], max_results=5)
+    assert payload["ok"] is True
+    assert [p["title"] for p in payload["papers"]] == ["Paper"]
+    assert payload["filters"]["exclude_types"] == ["grant", "standard"]
+    assert payload["dropped_type_counts"] == {"grant": 1}
+
+
+def test_search_explicit_type_can_keep_a_grant(fakes):
+    SEARCHES["types"] = [
+        _known("Paper", doi="10.1/a", work_type="article"),
+        _known("Grant", doi="10.1/g", work_type="grant"),
+    ]
+    payload = mcp_mod._tool_search(
+        "types", sources=["openalex"], max_results=5, types=["grant"]
+    )
+    assert [p["title"] for p in payload["papers"]] == ["Grant"]
+    assert payload["filters"]["types"] == ["grant"]
+    assert payload["filters"]["exclude_types"] == []
+
+
 def test_search_partial_failure_is_reported_not_fatal(fakes):
     FAILURES[("search", "boom")] = SourceError("openalex", "upstream is down")
     SEARCHES["boom"] = [_known("Survivor")]

@@ -32,6 +32,7 @@ from typing import Any
 
 from .errors import ConfigurationError
 from .models import TRIAGE_LABELS, Paper
+from .work_types import normalize_work_type
 
 __all__ = [
     "DEFAULT_EXCLUDED_TYPES",
@@ -61,7 +62,7 @@ def _keys_for(paper: Paper) -> list[str]:
     fallback the single-record label path has always accepted).
     """
     keys: list[str] = [key for key in paper.merge_keys()]
-    for value in (
+    values = [
         paper.doi,
         paper.arxiv_id,
         paper.pmid,
@@ -69,7 +70,15 @@ def _keys_for(paper: Paper) -> list[str]:
         paper.isbn,
         paper.primary_id(),
         paper.title,
-    ):
+    ]
+    # A promoted record's canonical DOI is the published one, but a saved
+    # screening decision may still name the preprint.  Index every version's
+    # bare identifier as well as the prefixed merge key, so both resolve.
+    for version in paper.versions:
+        values.extend(
+            (version.doi, version.arxiv_id, version.pmid, version.pmcid)
+        )
+    for value in values:
         text = str(value or "").strip()
         if text:
             keys.append(text)
@@ -375,10 +384,16 @@ def _rule_no_abstract(paper: Paper, criteria: PrescreenCriteria) -> str | None:
 
 
 def _rule_type(paper: Paper, criteria: PrescreenCriteria) -> str | None:
-    value = _fold(paper.work_type)
+    # Canonicalise both sides so "Journal Article" and "journal-article" are
+    # the same type, exactly as the search filter treats them.
+    value = normalize_work_type(paper.work_type)
     if not value:
         return None
-    excluded = {_fold(item) for item in criteria.exclude_types if _fold(item)}
+    excluded = {
+        canonical
+        for item in criteria.exclude_types
+        if (canonical := normalize_work_type(item))
+    }
     if value in excluded:
         return f"type: {value}"
     return None

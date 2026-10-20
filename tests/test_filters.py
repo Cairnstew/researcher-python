@@ -26,10 +26,18 @@ def _settings_with_email():
 
 
 class TestValidation:
-    def test_defaults_are_inactive(self) -> None:
+    def test_defaults_exclude_grants_and_standards(self) -> None:
         filters = SearchFilters()
         assert filters.field == "any"
         assert filters.year_from is None and filters.year_to is None
+        assert filters.types == ()
+        assert filters.exclude_types == ("grant", "standard")
+        # It is active because the default exclusion removes something.
+        assert filters.active is True
+
+    def test_no_policy_at_all_is_inactive(self) -> None:
+        filters = SearchFilters(exclude_types=())
+        assert filters.exclude_types == ()
         assert filters.active is False
 
     def test_any_year_or_field_makes_it_active(self) -> None:
@@ -56,6 +64,40 @@ class TestValidation:
     def test_a_bool_is_not_accepted_as_a_year(self) -> None:
         with pytest.raises(ValueError, match="must be an int"):
             SearchFilters(year_from=True)
+
+
+class TestTypePolicy:
+    def test_default_drops_grants_and_standards(self) -> None:
+        filters = SearchFilters()
+        assert filters.type_ok("grant") is False
+        assert filters.type_ok("standard") is False
+        assert filters.type_ok("article") is True
+        assert filters.type_ok("dataset") is True
+        assert filters.type_ok("") is True
+
+    def test_allow_list_replaces_the_default_exclusions(self) -> None:
+        filters = SearchFilters(types=("grant",))
+        assert filters.exclude_types == ()
+        assert filters.type_ok("grant") is True
+        assert filters.type_ok("standard") is False
+        assert filters.type_ok("article") is False
+
+    def test_unknown_type_is_kept_under_both_policies(self) -> None:
+        assert SearchFilters(types=("article",)).type_ok("mystery") is True
+        assert SearchFilters(exclude_types=("grant",)).type_ok("mystery") is True
+
+    def test_exclusion_wins_if_both_lists_name_a_type(self) -> None:
+        filters = SearchFilters(types=("article",), exclude_types=("article",))
+        assert filters.type_ok("article") is False
+
+    def test_aliases_are_canonicalised(self) -> None:
+        filters = SearchFilters(types=("journal-article", "Review"))
+        assert filters.types == ("article", "review")
+        assert filters.type_ok("Journal Article") is True
+
+    def test_explicit_empty_exclusion_disables_the_default(self) -> None:
+        filters = SearchFilters(exclude_types=())
+        assert filters.type_ok("grant") is True
 
 
 class TestYearWindow:
@@ -111,7 +153,7 @@ class TestApplyFilters:
     def test_inactive_filters_return_the_same_list_object(self) -> None:
         papers = [_paper("a")]
         assert apply_filters(papers, None) is papers
-        assert apply_filters(papers, SearchFilters()) is papers
+        assert apply_filters(papers, SearchFilters(exclude_types=())) is papers
 
     def test_filters_combine(self) -> None:
         papers = [

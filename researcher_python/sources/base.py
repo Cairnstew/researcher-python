@@ -29,6 +29,11 @@ from typing import Any
 from ..config import Settings
 from ..errors import SourceUnavailableError, UnsupportedOperation
 from ..models import Paper
+from ..work_types import (
+    DEFAULT_SEARCH_EXCLUDE_TYPES,
+    normalize_work_type,
+    resolve_types,
+)
 
 __all__ = [
     "Capabilities",
@@ -88,6 +93,15 @@ class SearchFilters:
     year_from: int | None = None
     year_to: int | None = None
     field: str = "any"
+    #: Allow-list of canonical work types (see ``work_types``).  Empty means
+    #: every type; an unknown type on a record is kept, because it cannot be
+    #: proved to be outside the list.
+    types: tuple[str, ...] = ()
+    #: Deny-list of canonical work types.  ``None`` means "the search default"
+    #: (:data:`DEFAULT_SEARCH_EXCLUDE_TYPES`), unless ``types`` is non-empty —
+    #: an explicit allow-list is unambiguous and wins.  Pass ``()`` to disable
+    #: the default exclusions explicitly.
+    exclude_types: tuple[str, ...] | None = None
 
     def __post_init__(self) -> None:
         if self.field not in SEARCH_FIELDS:
@@ -103,10 +117,38 @@ class SearchFilters:
                 if not 1000 <= value <= 2999:
                     raise ValueError(f"{name} {value} is not a plausible year")
 
+        types = resolve_types(self.types)
+        if self.exclude_types is None:
+            excluded = () if types else DEFAULT_SEARCH_EXCLUDE_TYPES
+        else:
+            excluded = resolve_types(self.exclude_types)
+        object.__setattr__(self, "types", types)
+        object.__setattr__(self, "exclude_types", excluded)
+
     @property
     def active(self) -> bool:
         """True when this filter would actually remove something."""
-        return self.field != "any" or self.year_from is not None or self.year_to is not None
+        return bool(
+            self.field != "any"
+            or self.year_from is not None
+            or self.year_to is not None
+            or self.types
+            or self.exclude_types
+        )
+
+    def type_ok(self, work_type: str | None) -> bool:
+        """Whether a record's native ``work_type`` survives the type policy.
+
+        An unknown/unrecognised type is kept for both an allow-list and a
+        deny-list: there is no evidence it is out.  Exclusion wins when a
+        caller names the same type in both lists.
+        """
+        canonical = normalize_work_type(work_type)
+        if canonical and canonical in (self.exclude_types or ()):
+            return False
+        if self.types:
+            return not canonical or canonical in self.types
+        return True
 
     def year_ok(self, year: int | None) -> bool:
         """Whether a record's ``year`` falls inside the window (unknown passes)."""
@@ -145,6 +187,11 @@ def matches_filters(
         return True
     if not filters.year_ok(paper.year):
         return False
+    # Work-type policy is enforced by the pipeline after the merge, not here:
+    # an adapter that filtered it would make its per-source count disagree with
+    # the PRISMA "identified" count, and the pipeline has the complete record
+    # (a merge may fill a type one source did not know).  Adapters still push an
+    # allow-list down to their API where it is expressible.
     if filters.field == "any":
         return True
     haystack = (
@@ -173,6 +220,10 @@ class Capabilities:
     citations: bool = False
     #: Source exposes a direct open-access PDF URL for a record.
     pdf: bool = False
+    #: Source can batch-resolve records by DOI (``works_by_dois``), which the
+    #: pipeline uses for the missing-count/abstract backfill.  Off by default:
+    #: a source without the method must never be asked for it.
+    enrich: bool = False
 
     def supports(self, operation: str) -> bool:
         return bool(getattr(self, operation, False))

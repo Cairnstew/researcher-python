@@ -69,6 +69,30 @@ def stub(source: OpenAlexSource, responder) -> list[dict[str, Any]]:  # noqa: AN
     return seen
 
 
+def test_search_pushes_a_type_allow_list_into_the_filter(source: OpenAlexSource) -> None:
+    from researcher_python.sources.base import SearchFilters
+
+    seen = stub(source, lambda url, params: FakeResponse(200, {"results": []}))
+
+    source.search(
+        "agents",
+        limit=5,
+        filters=SearchFilters(types=("article", "review"), exclude_types=()),
+    )
+
+    assert "type:article|review" in seen[0]["filter"]
+
+
+def test_search_does_not_try_to_push_a_negated_exclusion(source: OpenAlexSource) -> None:
+    from researcher_python.sources.base import SearchFilters
+
+    seen = stub(source, lambda url, params: FakeResponse(200, {"results": []}))
+
+    source.search("agents", limit=5, filters=SearchFilters())
+
+    assert "type:" not in seen[0].get("filter", "")
+
+
 # -- abstract reconstruction ------------------------------------------------
 
 

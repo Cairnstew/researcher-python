@@ -92,6 +92,8 @@ def prisma_report(
     by_channel: dict[str, int] = {}
     identified = 0
     identified_merged = 0
+    type_excluded = 0
+    type_excluded_by_type: dict[str, int] = {}
     rounds: set[int] = set()
     for entry in entries:
         count = _entry_identified(entry)
@@ -99,6 +101,13 @@ def prisma_report(
         merged = entry.get("outcome") or {}
         if isinstance(merged, Mapping):
             identified_merged += _as_int(merged.get("returned", merged.get("kept", 0)))
+            type_excluded += _as_int(merged.get("dropped_types", 0))
+            raw_types = merged.get("dropped_type_counts") or {}
+            if isinstance(raw_types, Mapping):
+                for name, value in raw_types.items():
+                    type_excluded_by_type[str(name)] = (
+                        type_excluded_by_type.get(str(name), 0) + _as_int(value)
+                    )
         channel = str(entry.get("channel") or "search")
         by_channel[channel] = by_channel.get(channel, 0) + count
         raw = entry.get("by_source") or {}
@@ -108,8 +117,11 @@ def prisma_report(
         rounds.add(_as_int(entry.get("round", 1)))
 
     deduped = len(items)
-    duplicates_removed = max(0, identified - deduped)
-    unaccounted = max(0, deduped - identified)
+    # A work-type exclusion is a screening-stage removal, not a duplicate:
+    # subtract it before attributing the rest to dedupe, so "identified"
+    # reconciles with "deduped" without hiding the policy.
+    duplicates_removed = max(0, identified - deduped - type_excluded)
+    unaccounted = max(0, deduped + type_excluded - identified)
     unreviewed = counts["unreviewed"]
     excluded = counts["excluded"]
     core = counts["core"]
@@ -144,6 +156,8 @@ def prisma_report(
         "identified": identified,
         "identified_merged": identified_merged,
         "duplicates_removed": duplicates_removed,
+        "type_excluded": type_excluded,
+        "type_excluded_by_type": dict(sorted(type_excluded_by_type.items())),
         "unaccounted": unaccounted,
         "deduped": deduped,
         "screened": screened,
@@ -176,8 +190,8 @@ def _cell(value: Any) -> str:
 def render_prisma_markdown(report: Mapping[str, Any]) -> str:
     """Render a PRISMA-style flow as Markdown for a report appendix."""
     d = {key: report.get(key, 0) for key in (
-        "identified", "duplicates_removed", "deduped", "screened", "excluded",
-        "unreviewed", "included", "core", "general",
+        "identified", "duplicates_removed", "type_excluded", "deduped",
+        "screened", "excluded", "unreviewed", "included", "core", "general",
     )}
     lines = [
         "# PRISMA-style screening flow",
@@ -186,7 +200,8 @@ def render_prisma_markdown(report: Mapping[str, Any]) -> str:
         "| --- | --- |",
         f"| Records identified | {d['identified']} |",
         f"| Duplicates removed | {d['duplicates_removed']} |",
-        f"| Records after duplicates | {d['deduped']} |",
+        f"| Work-type removals | {d['type_excluded']} |",
+        f"| Records after dedupe and type filter | {d['deduped']} |",
         f"| Records screened | {d['screened']} |",
         f"| Records excluded | {d['excluded']} |",
         f"| Awaiting screening | {d['unreviewed']} |",

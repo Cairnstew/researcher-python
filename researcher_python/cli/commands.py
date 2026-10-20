@@ -279,10 +279,31 @@ def cmd_search(args: argparse.Namespace, settings: Settings) -> int:
             "drop --search-log or use a workspace without --workspace"
         )
 
+    # An explicit --type list is an allow-list and replaces the default
+    # exclusions; --exclude-type otherwise appends to them.  Resolve the
+    # effective tuple here so the saved meta describes the search that ran.
+    requested_types = tuple(getattr(args, "work_types", None) or ())
+    extra_excludes = tuple(getattr(args, "exclude_types", None) or ())
+    if requested_types or getattr(args, "no_default_exclude", False):
+        exclude_types: tuple[str, ...] = extra_excludes
+    else:
+        from ..work_types import DEFAULT_SEARCH_EXCLUDE_TYPES
+
+        exclude_types = DEFAULT_SEARCH_EXCLUDE_TYPES + extra_excludes
     filters = SearchFilters(
-        year_from=args.year_from, year_to=args.year_to, field=args.field
+        year_from=args.year_from,
+        year_to=args.year_to,
+        field=args.field,
+        types=requested_types,
+        exclude_types=exclude_types,
     )
     requested = _requested_sources(args.sources)
+    if getattr(args, "no_enrich", False):
+        enrich: bool | None = False
+    elif getattr(args, "force_enrich", False):
+        enrich = True
+    else:
+        enrich = None
 
     outcome = None
     workspace = Workspace(workspace_path, settings=settings) if workspace_path else None
@@ -296,6 +317,7 @@ def cmd_search(args: argparse.Namespace, settings: Settings) -> int:
             min_score=args.min_score,
             top_ratio=args.top_ratio,
             min_citations=getattr(args, "min_citations", None),
+            enrich=enrich,
             channel="cli",
         )
         result = outcome.result
@@ -310,6 +332,7 @@ def cmd_search(args: argparse.Namespace, settings: Settings) -> int:
             min_score=args.min_score,
             top_ratio=args.top_ratio,
             min_citations=getattr(args, "min_citations", None),
+            enrich=enrich,
         )
 
     if args.format == "json":
@@ -325,7 +348,16 @@ def cmd_search(args: argparse.Namespace, settings: Settings) -> int:
             "min_score": args.min_score,
             "top_ratio": args.top_ratio,
             "min_citations": getattr(args, "min_citations", None),
+            "types": list(filters.types),
+            "exclude_types": list(filters.exclude_types or ()),
             "dropped": result.dropped,
+            "dropped_types": result.dropped_types,
+            "dropped_type_counts": dict(result.dropped_type_counts),
+            "versions_linked": result.versions_linked,
+            "enrich": enrich,
+            "enrichment": (
+                result.enrichment.to_dict() if result.enrichment else None
+            ),
             "terms": result.terms,
             "errors": {name: str(err) for name, err in result.errors.items()},
         }
@@ -362,6 +394,31 @@ def cmd_search(args: argparse.Namespace, settings: Settings) -> int:
     )
     # A floor that removed records must say so: a thin result set is otherwise
     # indistinguishable from a sparse one.
+    if result.enrichment and result.enrichment.ok:
+        report = result.enrichment
+        print(
+            "enriched "
+            f"{report.citation_filled} citation count(s), "
+            f"{report.abstract_filled} abstract(s) "
+            f"(citation coverage {report.coverage_before:.0%} -> "
+            f"{report.coverage_after:.0%})",
+            file=sys.stderr,
+        )
+    elif result.enrichment and result.enrichment.errors:
+        print(
+            f"enrichment failed: {'; '.join(result.enrichment.errors)}",
+            file=sys.stderr,
+        )
+    if result.dropped_type_counts:
+        by_type = ", ".join(
+            f"{name}={count}"
+            for name, count in sorted(result.dropped_type_counts.items())
+        )
+        print(
+            f"dropped {result.dropped_types} record(s) by work type "
+            f"({by_type})",
+            file=sys.stderr,
+        )
     if result.dropped:
         floors = []
         if args.min_score is not None:

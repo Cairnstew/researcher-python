@@ -64,6 +64,20 @@ def ws(tmp_path: Path) -> Workspace:
     return Workspace(tmp_path / "workspace", settings=Settings())
 
 
+def test_search_params_round_trip_the_type_and_enrich_policy() -> None:
+    params = SearchParams(
+        query="q",
+        sources=("openalex",),
+        types=("article",),
+        exclude_types=(),
+        enrich=False,
+    )
+    loaded = SearchParams.from_dict(params.to_dict())
+    assert loaded.types == ("article",)
+    assert loaded.exclude_types == ()
+    assert loaded.enrich is False
+
+
 # ---------------------------------------------------------------------- #
 # Creation and layout
 # ---------------------------------------------------------------------- #

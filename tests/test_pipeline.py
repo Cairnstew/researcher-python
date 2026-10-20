@@ -34,8 +34,16 @@ def paper(
     arxiv_id: str = "",
     pmid: str = "",
     year: int | None = None,
+    work_type: str = "",
 ) -> Paper:
-    return Paper(title=title, doi=doi, arxiv_id=arxiv_id, pmid=pmid, year=year)
+    return Paper(
+        title=title,
+        doi=doi,
+        arxiv_id=arxiv_id,
+        pmid=pmid,
+        year=year,
+        work_type=work_type,
+    )
 
 
 class FakeSource(Source):
@@ -86,6 +94,18 @@ class FakeOpenAlex(FakeSource):
     name = "openalex"
 
 
+class FakeEnrichOpenAlex(FakeOpenAlex):
+    """OpenAlex stand-in that actually serves the batch enrichment method."""
+
+    capabilities = Capabilities(
+        search=True, get=True, references=False, citations=False, pdf=False, enrich=True
+    )
+
+    def works_by_dois(self, dois):
+        CALLS.append("enrich:openalex")
+        return list(BEHAVIOUR.get("enrich_results", []))
+
+
 class FakeCrossref(FakeSource):
     name = "crossref"
 
@@ -131,6 +151,137 @@ def fakes(monkeypatch: pytest.MonkeyPatch) -> Any:
     BEHAVIOUR.clear()
     CALLS.clear()
     SLEEPS.clear()
+
+
+# -- enrichment + version links -------------------------------------------
+
+
+def test_enrichment_fills_missing_counts(
+    fakes: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(
+        registry._REGISTRY, "openalex", (__name__, "FakeEnrichOpenAlex")
+    )
+    BEHAVIOUR["openalex"] = {"search_results": [paper("A", doi="10.1/a")]}
+    BEHAVIOUR["enrich_results"] = [Paper(doi="10.1/a", citation_count=12)]
+
+    result = pipeline.search("query", sources=["openalex"])
+
+    assert result.papers[0].citation_count == 12
+    assert result.papers[0].citation_count_source == "openalex"
+    assert result.enrichment is not None and result.enrichment.ok
+    assert result.enrichment.citation_filled == 1
+    assert "enrich:openalex" in CALLS
+
+
+def test_enrichment_can_be_disabled(
+    fakes: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(
+        registry._REGISTRY, "openalex", (__name__, "FakeEnrichOpenAlex")
+    )
+    BEHAVIOUR["openalex"] = {"search_results": [paper("A", doi="10.1/a")]}
+    BEHAVIOUR["enrich_results"] = [Paper(doi="10.1/a", citation_count=12)]
+
+    result = pipeline.search("query", sources=["openalex"], enrich=False)
+
+    assert result.papers[0].citation_count is None
+    assert result.enrichment is None
+    assert "enrich:openalex" not in CALLS
+
+
+def test_force_enrich_can_add_openalex_to_a_crossref_only_search(
+    fakes: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setitem(
+        registry._REGISTRY, "openalex", (__name__, "FakeEnrichOpenAlex")
+    )
+    BEHAVIOUR["crossref"] = {"search_results": [paper("A", doi="10.1/a")]}
+    BEHAVIOUR["enrich_results"] = [Paper(doi="10.1/a", citation_count=9)]
+
+    default = pipeline.search("query", sources=["crossref"])
+    assert default.papers[0].citation_count is None
+    assert "enrich:openalex" not in CALLS
+
+    forced = pipeline.search("query", sources=["crossref"], enrich=True)
+    assert forced.papers[0].citation_count == 9
+    assert "enrich:openalex" in CALLS
+
+
+def test_enrichment_discovers_a_version_link_and_collapses_the_pair(
+    fakes: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from researcher_python.models import PaperVersion
+
+    monkeypatch.setitem(
+        registry._REGISTRY, "openalex", (__name__, "FakeEnrichOpenAlex")
+    )
+    BEHAVIOUR["openalex"] = {
+        "search_results": [
+            paper("Work", doi="10.1/pre", work_type="preprint"),
+            paper("Work", doi="10.1/pub", work_type="article"),
+        ]
+    }
+    enriched = Paper(
+        doi="10.1/pub",
+        title="Work",
+        work_type="article",
+        citation_count=5,
+        versions=[PaperVersion(kind="preprint", doi="10.1/pre")],
+    )
+    BEHAVIOUR["enrich_results"] = [enriched]
+
+    result = pipeline.search("query", sources=["openalex"])
+
+    assert len(result.papers) == 1
+    assert result.papers[0].doi == "10.1/pub"
+    assert result.versions_linked == 1
+
+
+# -- work-type policy ------------------------------------------------------
+
+
+def test_search_drops_grants_and_standards_by_default(fakes: None) -> None:
+    BEHAVIOUR["openalex"] = {
+        "search_results": [
+            paper("Article", doi="10.1/a", work_type="article"),
+            paper("Grant", doi="10.1/g", work_type="grant"),
+            paper("Standard", doi="10.1/s", work_type="standard"),
+            paper("Dataset", doi="10.1/d", work_type="dataset"),
+        ]
+    }
+
+    result = pipeline.search("query", sources=["openalex"], enrich=False)
+
+    assert [p.title for p in result.papers] == ["Article", "Dataset"]
+    assert result.dropped_types == 2
+    assert result.dropped_type_counts == {"grant": 1, "standard": 1}
+    # The raw per-source count still sees the identified records, so PRISMA
+    # can reconcile them.
+    assert result.by_source == {"openalex": 4}
+
+
+def test_an_explicit_type_list_can_find_grants(fakes: None) -> None:
+    BEHAVIOUR["openalex"] = {
+        "search_results": [
+            paper("Article", doi="10.1/a", work_type="article"),
+            paper("Grant", doi="10.1/g", work_type="grant"),
+        ]
+    }
+
+    result = pipeline.search(
+        "query", sources=["openalex"], work_types=["grant"], enrich=False
+    )
+
+    assert [p.title for p in result.papers] == ["Grant"]
+
+
+def test_unknown_work_type_is_kept(fakes: None) -> None:
+    BEHAVIOUR["openalex"] = {
+        "search_results": [paper("Mystery", doi="10.1/m", work_type="mystery")]
+    }
+    result = pipeline.search("query", sources=["openalex"], enrich=False)
+    assert [p.title for p in result.papers] == ["Mystery"]
 
 
 # -- search: fan out -------------------------------------------------------

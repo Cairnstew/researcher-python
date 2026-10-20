@@ -415,6 +415,10 @@ def _tool_search(
     compact: bool = False,
     min_citations: int | None = None,
     workspace: str | None = None,
+    types: list[str] | None = None,
+    exclude_types: list[str] | None = None,
+    default_excludes: bool = True,
+    enrich: bool | None = None,
 ) -> dict[str, Any]:
     """Search with an optional publication window, field scope and floors.
 
@@ -424,8 +428,21 @@ def _tool_search(
     Without a workspace the call stays pure and returns ``persisted: false``.
     """
     try:
+        from .work_types import DEFAULT_SEARCH_EXCLUDE_TYPES, resolve_types
+
+        requested_types = resolve_types(types or ())
+        if exclude_types is not None:
+            effective_excludes = resolve_types(exclude_types)
+        elif requested_types or not default_excludes:
+            effective_excludes = ()
+        else:
+            effective_excludes = DEFAULT_SEARCH_EXCLUDE_TYPES
         filters = SearchFilters(
-            year_from=year_from, year_to=year_to, field=field
+            year_from=year_from,
+            year_to=year_to,
+            field=field,
+            types=requested_types,
+            exclude_types=effective_excludes,
         )
     except ValueError as exc:
         return {
@@ -447,6 +464,7 @@ def _tool_search(
                 min_score=min_score,
                 top_ratio=top_ratio,
                 min_citations=min_citations,
+                enrich=enrich,
                 channel="mcp",
                 settings=_settings(),
             )
@@ -462,6 +480,7 @@ def _tool_search(
                 min_score=min_score,
                 top_ratio=top_ratio,
                 min_citations=min_citations,
+                enrich=enrich,
             )
     except ResearcherError as exc:
         return _fail(exc)
@@ -471,10 +490,19 @@ def _tool_search(
         "year_from": year_from,
         "year_to": year_to,
         "field": field,
+        "types": list(filters.types),
+        "exclude_types": list(filters.exclude_types or ()),
     }
     payload["min_score"] = min_score
     payload["top_ratio"] = top_ratio
     payload["min_citations"] = min_citations
+    payload["enrich"] = enrich
+    payload["versions_linked"] = result.versions_linked
+    payload["dropped_types"] = result.dropped_types
+    payload["dropped_type_counts"] = dict(result.dropped_type_counts)
+    payload["enrichment"] = (
+        result.enrichment.to_dict() if result.enrichment is not None else None
+    )
     if result.hint:
         payload["hint"] = result.hint
 
@@ -1256,6 +1284,10 @@ def build_server(settings: Settings | None = None):
         compact: bool = False,
         min_citations: int | None = None,
         workspace: str | None = None,
+        types: list[str] | None = None,
+        exclude_types: list[str] | None = None,
+        default_excludes: bool = True,
+        enrich: bool | None = None,
     ) -> dict:
         """Search papers across sources and return merged, deduped records.
 
@@ -1285,6 +1317,14 @@ def build_server(settings: Settings | None = None):
         An empty result set explains itself in ``hint`` (e.g. a field-scoped
         AND match that is too long to match anything).
 
+        ``types`` is an allow-list of canonical work types (``article``,
+        ``review``, ``preprint``, ``book``, ``dataset``, ``grant``, ...);
+        source spellings such as ``journal-article`` are accepted.  By default
+        searches exclude ``grant`` and ``standard``; an explicit ``types`` list
+        replaces that default, and ``exclude_types`` adds to it.  Set
+        ``default_excludes=False`` to start with no exclusions.  A record with
+        an unknown type is kept.
+
         ``min_citations`` drops records below a raw citation count.  An
         **unknown** count is kept (never hide grey literature), and raw counts
         reward age — the matrix's ``citations_per_year`` column is the
@@ -1298,6 +1338,7 @@ def build_server(settings: Settings | None = None):
         return _tool_search(
             query, sources, max_results, sort, year_from, year_to, field,
             min_score, top_ratio, compact, min_citations, workspace,
+            types, exclude_types, default_excludes, enrich,
         )
 
     @server.tool()

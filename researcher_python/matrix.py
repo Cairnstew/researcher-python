@@ -37,6 +37,7 @@ from .errors import ExportError
 from .export import _atomic_text, _label
 from .format import _squash
 from .models import TRIAGE_LABELS, Paper
+from .work_types import normalize_work_type
 
 __all__ = [
     "LITERATURE_COLUMNS",
@@ -322,8 +323,12 @@ _TYPE_ALIASES: dict[str, str] = {
 
 
 def _type_key(value: str) -> str:
-    """Canonical key for a work type, so one type is one row."""
-    return _TYPE_ALIASES.get(_squash(value).casefold(), _squash(value).casefold())
+    """Canonical key for a work type, so one type is one row.
+
+    Uses the same vocabulary as the search filter: ``Journal Article``,
+    ``journal-article`` and ``article`` are one synthesis row.
+    """
+    return normalize_work_type(value) or _squash(value).casefold() or "(unknown)"
 
 
 def _dimension_values(paper: Paper, dimension: str) -> list[str]:

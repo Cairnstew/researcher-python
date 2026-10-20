@@ -103,12 +103,19 @@ from .models import (
     MergeOutcome,
     Paper,
     PaperIndex,
+    PaperVersion,
     dedupe,
     merge,
     merge_sets,
     sort_papers,
 )
 from .prisma import prisma_report, render_prisma_markdown
+from .work_types import (
+    CANONICAL_WORK_TYPES,
+    DEFAULT_SEARCH_EXCLUDE_TYPES,
+    normalize_work_type,
+    resolve_types,
+)
 from .screening import (
     DEFAULT_EXCLUDED_TYPES,
     DEFAULT_PRESCREEN_RULES,
@@ -186,6 +193,7 @@ __all__ = [
     "Author",
     "Paper",
     "PaperIndex",
+    "PaperVersion",
     # configuration
     "ENV_KEYS",
     "Settings",
@@ -197,6 +205,8 @@ __all__ = [
     "SORT_MODES",
     "SearchFilters",
     "TRIAGE_LABELS",
+    "CANONICAL_WORK_TYPES",
+    "DEFAULT_SEARCH_EXCLUDE_TYPES",
     "MergeOutcome",
     "create_source",
     "dedupe",
@@ -207,6 +217,8 @@ __all__ = [
     "search",
     "sort_papers",
     "source_names",
+    "normalize_work_type",
+    "resolve_types",
     # screening primitives
     "DEFAULT_EXCLUDED_TYPES",
     "DEFAULT_PRESCREEN_RULES",

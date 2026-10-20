@@ -74,6 +74,7 @@ to get it.
 | `RESEARCHER_LOG_LEVEL` | optional | `DEBUG`/`INFO`/`WARNING`/`ERROR` |
 | `RESEARCHER_MAX_RESULTS` | optional | per-source cap for one search (default 50) |
 | `RESEARCHER_RETRIES` | optional | extra attempts after a 429 (default 1) |
+| `RESEARCHER_ENRICH` | optional | backfill missing counts/abstracts from OpenAlex (default true) |
 
 A missing `RESEARCHER_EMAIL` does not stop the library: it only surfaces when
 a command actually needs it (building the `pubmed` source, or resolving a PDF
@@ -101,10 +102,56 @@ python -m researcher_python search "transformer attention" \
 python -m researcher_python get 10.1103/PhysRevLett.116.061102
 python -m researcher_python get 1706.03762 --format json
 
+# Work-type policy: grants and standards are excluded by default. Datasets are
+# not — they can be legitimate hits, and `prescreen` flags them later.
+python -m researcher_python search "AI governance" --type article,review
+python -m researcher_python search "AI governance" --exclude-type dataset
+python -m researcher_python search "funding instruments" --type grant
+
 # Fetch PDFs for one or more identifiers
 python -m researcher_python download 1706.03762 10.1103/PhysRevLett.116.061102 \
     --output-dir papers
 ```
+
+### Data quality: types, counts and versions
+
+Three post-merge passes make a merged set usable rather than merely long.
+
+**Work types.** `--type` / `--types` is an allow-list, `--exclude-type` adds to
+the default deny-list, and `--no-default-exclude` starts from nothing. Every
+source spelling (`journal-article`, `Journal Article`, `JournalArticle`) is
+canonicalised, so a filter means the same thing across sources. The defaults
+are **grant** and **standard**; `dataset` is deliberately not excluded (it can
+be a real hit, and `prescreen` already flags one visibly). An unknown type is
+kept — there is no evidence it is out, the same rule as an unknown year. The
+pipeline reports `dropped_types` and a per-type breakdown separately from the
+relevance/citation floors, and `prisma` uses it so *identified → deduped*
+reconciles without pretending a grant was a duplicate.
+
+**Citation and abstract backfill.** When OpenAlex participates in a search, the
+pipeline batch-resolves every DOI-bearing record (and arXiv-only records via
+their `10.48550/arxiv.X` DOI) in chunks of 50. It fills only **missing**
+`citation_count`, `reference_count`, `abstract` and `work_type` — a Crossref or
+Semantic Scholar count is never overwritten — and records
+`citation_count_source`. The reply carries an `enrichment` report with
+before/after coverage. In the 1,675-record CW1 corpus this moved citation
+coverage from ~69% to ~99% and abstract coverage from ~76% to ~83%, which is
+what makes the matrix's `citations_per_year` column usable. `--no-enrich`
+disables it and `--enrich` forces it even when OpenAlex was not searched; by
+default it only runs for the sources you actually asked for, so `--source
+pubmed` does not silently acquire an OpenAlex lookup.
+
+**Preprint/published versions.** A record that has both a preprint and a journal
+version is kept as **one** `Paper` with a `versions` list. Links are explicit:
+a shared arXiv id, the arXiv DOI (`10.48550/arxiv.X`), an OpenAlex `locations`
+entry, a Crossref `is-preprint-of`/`is-version-of` relation, or a Semantic
+Scholar `externalIds.ArXiv`. The published version supplies the bibliographic
+fields (DOI, venue, year, type); the preprint keeps the arXiv id and open PDF.
+Reader labels and notes are never touched, and identifier lookups resolve
+through `versions[]`/`merge_keys()` under both the old and new DOI. A
+title+year match no longer merges a preprint with a published record unless an
+explicit link exists — a visible duplicate is better than a silently lost
+version.
 
 ### The coursework workflow
 

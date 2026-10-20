@@ -54,7 +54,7 @@ from ..ids import (
     normalize_orcid,
     wire_doi,
 )
-from ..models import Author, Paper
+from ..models import Author, Paper, PaperVersion
 from .base import (
     Capabilities,
     SearchFilters,
@@ -77,6 +77,30 @@ __all__ = [
 #: Crossref's documented ceiling for ``rows`` / ``offset`` combined.
 _PAGE_SIZE = 100
 _MAX_ROWS = 1000
+
+
+#: Canonical work type -> Crossref ``type``.  Crossref has no OR syntax for
+#: one filter key, so only a single unambiguous value is pushed down; every
+#: other case is applied locally by ``apply_filters``.
+_CROSSREF_TYPES = {
+    "article": "journal-article",
+    "review": "journal-article",
+    "preprint": "posted-content",
+    "book": "book",
+    "book-chapter": "book-chapter",
+    "proceedings-article": "proceedings-article",
+    "thesis": "dissertation",
+    "report": "report",
+    "dataset": "dataset",
+    "grant": "grant",
+    "standard": "standard",
+    "editorial": "editorial",
+    "letter": "letter",
+    "erratum": "other",
+    "peer-review": "peer-review",
+    "paratext": "other",
+    "other": "other",
+}
 #: ``10.48550/arXiv.<id>`` is the DataCite DOI form of an arXiv preprint.
 _ARXIV_DOI = re.compile(r"^10\.48550/arxiv\.(.+)$", re.IGNORECASE)
 #: Anything shaped ``<...>`` — JATS elements, never literal prose.
@@ -240,6 +264,7 @@ def parse_crossref_work(message: Mapping[str, Any]) -> Paper:
         work_type=squash_text(work.get("type")),
         categories=categories,
         citation_count=_int(work.get("is-referenced-by-count")),
+        citation_count_source="crossref",
         reference_count=_int(work.get("reference-count")),
         is_open_access=False,
         oa_status="",
@@ -247,7 +272,46 @@ def parse_crossref_work(message: Mapping[str, Any]) -> Paper:
     )
     if doi:
         paper.ids.setdefault("doi", doi)
+    paper.versions = _relation_versions(work, doi)
     return paper
+
+
+#: Crossref relation keys that assert a version relationship.  ``references``,
+#: ``is-supplement-to`` and ``is-cited-by`` are emphatically not versions.
+_VERSION_RELATIONS = {
+    "is-preprint-of": "published",
+    "has-preprint": "preprint",
+    "is-version-of": "unknown",
+    "has-version": "unknown",
+}
+
+
+def _relation_versions(work: Mapping[str, Any], own_doi: str) -> list[PaperVersion]:
+    """Version entries asserted by Crossref's ``relation`` object."""
+    relation = work.get("relation")
+    if not isinstance(relation, Mapping):
+        return []
+    out: list[PaperVersion] = []
+    for name, kind in _VERSION_RELATIONS.items():
+        for entry in relation.get(name) or ():
+            if not isinstance(entry, Mapping):
+                continue
+            if squash_text(entry.get("id-type")).casefold() != "doi":
+                continue
+            doi = normalize_doi(entry.get("id"))
+            if not doi or doi == own_doi:
+                continue
+            out.append(
+                PaperVersion(
+                    kind=kind,
+                    doi=doi,
+                    source="crossref",
+                    relation=name,
+                    asserted_by=squash_text(entry.get("asserted-by")),
+                    is_published=True if kind == "published" else None,
+                )
+            )
+    return out
 
 
 def parse_crossref_reference(entry: Mapping[str, Any]) -> Paper | None:
@@ -455,6 +519,12 @@ class CrossrefSource(Source):
                 filter_parts["from-pub-date"] = f"{filters.year_from}-01-01"
             if filters.year_to is not None:
                 filter_parts["until-pub-date"] = f"{filters.year_to}-12-31"
+            if filters.types:
+                mapped = {_CROSSREF_TYPES.get(t) for t in filters.types}
+                # One canonical type + one Crossref spelling is the only shape
+                # habanero can express for this key; otherwise filter locally.
+                if len(mapped) == 1 and None not in mapped:
+                    filter_parts["type"] = next(iter(mapped))
             if filter_parts:
                 # habanero's ``works(filter=...)`` expects a dict and renders it
                 # to Crossref's ``name:value`` syntax itself; a string raises

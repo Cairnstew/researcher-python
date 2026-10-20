@@ -113,6 +113,28 @@ def normalize_arxiv_id(value: str | None, *, keep_version: bool = False) -> str:
     return text
 
 
+_ARXIV_DOI = re.compile(r"^10\.48550/arxiv\.(.+)$", re.IGNORECASE)
+
+
+def arxiv_doi(value: str | None) -> str:
+    """The canonical arXiv DOI for an arXiv id, or ``""``.
+
+    arXiv assigns every preprint a DataCite DOI under ``10.48550``.  It is the
+    address OpenAlex and Semantic Scholar can resolve when the record carries
+    no journal DOI, so enrichment uses it as a lookup key — without writing it
+    into ``Paper.doi`` (which is the *published* identity).
+    """
+    bare = normalize_arxiv_id(value)
+    return f"10.48550/arxiv.{bare}" if bare and is_arxiv_id(bare) else ""
+
+
+def arxiv_id_from_doi(value: str | None) -> str:
+    """Extract the arXiv id from an arXiv DOI, or ``""``."""
+    doi = normalize_doi(value)
+    match = _ARXIV_DOI.match(doi)
+    return normalize_arxiv_id(match.group(1)) if match else ""
+
+
 def is_arxiv_id(value: str | None) -> bool:
     """True when ``value`` looks like a current or legacy arXiv id."""
     bare = normalize_arxiv_id(value)
@@ -231,6 +253,8 @@ def year_from_date(value: str | None) -> int | None:
 
 
 __all__ = [
+    "arxiv_doi",
+    "arxiv_id_from_doi",
     "is_arxiv_id",
     "is_doi",
     "is_isbn",

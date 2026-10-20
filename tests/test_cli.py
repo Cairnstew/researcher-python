@@ -550,6 +550,69 @@ def test_search_json_envelope_and_meta_errors(
     assert "broken: SourceError: boom" in captured.err
 
 
+def test_search_type_flags_filter_and_record_the_policy(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(title="Paper", doi="10.1/a", work_type="article"),
+            make_paper(title="Grant", doi="10.1/g", work_type="grant"),
+            make_paper(title="Standard", doi="10.1/s", work_type="standard"),
+        ]
+    }
+
+    code = main(["search", "q", "--source", "alpha", "--format", "json"])
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert [p["title"] for p in payload["papers"]] == ["Paper"]
+    assert payload["meta"]["exclude_types"] == ["grant", "standard"]
+    assert payload["meta"]["dropped_type_counts"] == {"grant": 1, "standard": 1}
+
+
+def test_search_type_allow_list_can_find_a_grant(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(title="Paper", doi="10.1/a", work_type="article"),
+            make_paper(title="Grant", doi="10.1/g", work_type="grant"),
+        ]
+    }
+
+    code = main(
+        ["search", "q", "--source", "alpha", "--type", "grant", "--format", "json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert [p["title"] for p in payload["papers"]] == ["Grant"]
+    assert payload["meta"]["types"] == ["grant"]
+    assert payload["meta"]["exclude_types"] == []
+
+
+def test_search_exclude_type_appends_to_the_default(
+    world: None, capsys: pytest.CaptureFixture[str]
+) -> None:
+    BEHAVIOUR["alpha"] = {
+        "search_results": [
+            make_paper(title="Paper", doi="10.1/a", work_type="article"),
+            make_paper(title="Data", doi="10.1/d", work_type="dataset"),
+            make_paper(title="Grant", doi="10.1/g", work_type="grant"),
+        ]
+    }
+
+    code = main(
+        ["search", "q", "--source", "alpha", "--exclude-type", "dataset",
+         "--format", "json"]
+    )
+    payload = json.loads(capsys.readouterr().out)
+
+    assert code == 0
+    assert [p["title"] for p in payload["papers"]] == ["Paper"]
+    assert payload["meta"]["exclude_types"] == ["grant", "standard", "dataset"]
+
+
 def test_search_jsonl_is_one_object_per_line(
     world: None, capsys: pytest.CaptureFixture[str]
 ) -> None:

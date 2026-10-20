@@ -384,13 +384,13 @@ class TestTypeNormalisation:
     def test_variants_collapse(self) -> None:
         rows = {r["type"]: r for r in matrix.synthesis_matrix(self._papers(), "type")}
         assert len(rows) == 2
-        assert rows["journal-article"]["total"] == "3"
-        assert rows["conference-paper"]["total"] == "1"
+        assert rows["article"]["total"] == "3"
+        assert rows["proceedings-article"]["total"] == "1"
 
     def test_display_uses_the_canonical_name(self) -> None:
         rows = {r["type"] for r in matrix.synthesis_matrix(self._papers(), "type")}
-        assert "journal-article" in rows
-        assert "article" not in rows
+        assert "article" in rows
+        assert "journal-article" not in rows
         assert "Journal Article" not in rows
 
     def test_unknown_type_is_its_own_row(self) -> None:

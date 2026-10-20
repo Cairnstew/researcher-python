@@ -45,7 +45,7 @@ import re
 import secrets
 import tempfile
 import time
-from collections.abc import Iterable, Mapping
+from collections.abc import Iterable, Mapping, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass, field, replace
 from datetime import datetime, timezone
@@ -258,6 +258,11 @@ class SearchParams:
     min_score: float | None = None
     top_ratio: float | None = None
     min_citations: int | None = None
+    #: Effective work-type policy, resolved before the search runs so the
+    #: provenance row describes what was actually applied.
+    types: tuple[str, ...] = ()
+    exclude_types: tuple[str, ...] = ()
+    enrich: bool | None = None
     round: int | None = None
     channel: str = "library"
 
@@ -273,6 +278,9 @@ class SearchParams:
             "min_score": self.min_score,
             "top_ratio": self.top_ratio,
             "min_citations": self.min_citations,
+            "types": list(self.types),
+            "exclude_types": list(self.exclude_types),
+            "enrich": self.enrich,
             "round": self.round,
             "channel": self.channel,
         }
@@ -295,6 +303,13 @@ class SearchParams:
             min_score=_as_float(data.get("min_score")),
             top_ratio=_as_float(data.get("top_ratio")),
             min_citations=_as_int(data.get("min_citations")),
+            types=tuple(str(x) for x in (data.get("types") or ())),
+            exclude_types=tuple(str(x) for x in (data.get("exclude_types") or ())),
+            enrich=(
+                bool(data["enrich"])
+                if isinstance(data.get("enrich"), bool)
+                else None
+            ),
             round=_as_int(data.get("round")),
             channel=str(data.get("channel") or "library"),
         )
@@ -1046,6 +1061,9 @@ class Workspace:
         year_from: int | None = None,
         year_to: int | None = None,
         min_citations: int | None = None,
+        work_types: Sequence[str] | str | None = None,
+        exclude_types: Sequence[str] | str | None = None,
+        enrich: bool | None = None,
         channel: str = "library",
         settings: Settings | None = None,
     ) -> WorkspaceSearch:
@@ -1065,6 +1083,9 @@ class Workspace:
             year_from=year_from,
             year_to=year_to,
             min_citations=min_citations,
+            work_types=work_types,
+            exclude_types=exclude_types,
+            enrich=enrich,
         )
         duration_ms = (time.perf_counter() - started) * 1000.0
 
@@ -1072,9 +1093,20 @@ class Workspace:
             field_name = getattr(filters, "field", "any") or "any"
             filter_from = getattr(filters, "year_from", None)
             filter_to = getattr(filters, "year_to", None)
+            filter_types = tuple(getattr(filters, "types", ()) or ())
+            filter_excludes = tuple(getattr(filters, "exclude_types", ()) or ())
         else:
             field_name = field or "any"
             filter_from, filter_to = year_from, year_to
+            from .work_types import DEFAULT_SEARCH_EXCLUDE_TYPES, resolve_types
+
+            filter_types = resolve_types(work_types or ())
+            if exclude_types is None:
+                filter_excludes = (
+                    () if filter_types else DEFAULT_SEARCH_EXCLUDE_TYPES
+                )
+            else:
+                filter_excludes = resolve_types(exclude_types)
 
         if sources is None:
             requested = tuple(DEFAULT_SOURCES)
@@ -1096,6 +1128,9 @@ class Workspace:
             min_score=min_score,
             top_ratio=top_ratio,
             min_citations=min_citations,
+            types=filter_types,
+            exclude_types=filter_excludes,
+            enrich=enrich,
             round=self.round,
             channel=channel,
         )
@@ -1704,6 +1739,8 @@ def log_entry_for(
             "screened": screened,
             "total": len(outcome.papers),
             "dropped": result.dropped,
+            "dropped_types": result.dropped_types,
+            "dropped_type_counts": dict(result.dropped_type_counts),
             "terms": list(result.terms),
         },
         "by_source": dict(result.by_source),

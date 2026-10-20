@@ -41,7 +41,7 @@ from ..ids import (
     normalize_pmid,
     wire_doi,
 )
-from ..models import Author, Paper
+from ..models import Author, Paper, PaperVersion
 from .base import (
     Capabilities,
     SearchFilters,
@@ -62,7 +62,23 @@ _MAX_OFFSET = 1000
 #: Explicit on every call — the API's default set omits externalIds/openAccessPdf.
 #: ``paperId`` is the Graph API's own stable id, kept in ``ids`` so a record can
 #: be re-queried even when it has no DOI.
-_FIELDS = "paperId,title,abstract,year,authors,externalIds,venue,openAccessPdf,citationCount"
+_FIELDS = (
+    "paperId,title,abstract,year,authors,externalIds,publicationTypes,"
+    "publicationDate,journal,venue,openAccessPdf,citationCount"
+)
+
+#: Canonical work type -> Semantic Scholar ``publicationTypes`` enum.
+_S2_TYPES = {
+    "article": "JournalArticle",
+    "review": "Review",
+    "preprint": "Preprint",
+    "book": "Book",
+    "book-chapter": "BookSection",
+    "proceedings-article": "Conference",
+    "dataset": "Dataset",
+    "editorial": "Editorial",
+    "letter": "LettersAndComments",
+}
 #: ~1 request/second baseline for both tiers (keyless and keyed).
 _INTERVAL = 1.1
 
@@ -81,6 +97,40 @@ def _env_var_for(field: str) -> str:
         if name == field:
             return env_name
     return field
+
+
+def _external_versions(doi: str, arxiv_id: str) -> list[PaperVersion]:
+    """A published S2 record that carries an arXiv id names its preprint.
+
+    S2 returns one record with both ``externalIds.DOI`` and
+    ``externalIds.ArXiv``; recording the arXiv side as an explicit version lets
+    the merge promote the DOI while keeping the preprint discoverable.
+    """
+    if not doi or not arxiv_id:
+        return []
+    return [
+        PaperVersion(
+            kind="preprint",
+            arxiv_id=arxiv_id,
+            source="semantic_scholar",
+            relation="external-id",
+            asserted_by="semantic_scholar",
+            is_published=False,
+        )
+    ]
+
+
+def _work_type(record: Mapping[str, Any]) -> str:
+    """First publication type, or ``""`` — S2 returns a list or null."""
+    raw = record.get("publicationTypes")
+    if isinstance(raw, str):
+        return squash_text(raw)
+    if isinstance(raw, list):
+        for item in raw:
+            text = squash_text(item)
+            if text:
+                return text
+    return ""
 
 
 def parse_s2_paper(d: Mapping[str, Any]) -> Paper:
@@ -157,9 +207,12 @@ def parse_s2_paper(d: Mapping[str, Any]) -> Paper:
         authors=authors,
         year=year,
         venue=squash_text(record.get("venue")),
+        work_type=_work_type(record),
         citation_count=citation_count,
+        citation_count_source="semantic_scholar",
         # No openAccessPdf means the API found no free copy it trusts.
         is_open_access=bool(pdf_url),
+        versions=_external_versions(doi, arxiv_id),
     )
 
 
@@ -347,10 +400,19 @@ class SemanticScholarSource(Source):
         offset = 0
         while len(collected) < want and offset < _MAX_OFFSET:
             size = min(_PAGE_SIZE, want if not narrowing else _PAGE_SIZE)
-            payload = self._get(
-                "/paper/search",
-                {"query": text, "limit": size, "offset": offset, "fields": _FIELDS},
-            )
+            params: dict[str, Any] = {
+                "query": text,
+                "limit": size,
+                "offset": offset,
+                "fields": _FIELDS,
+            }
+            if filters is not None and filters.types:
+                mapped = [_S2_TYPES.get(t) for t in filters.types]
+                # S2 takes a comma-separated enum list.  If a requested type
+                # has no S2 spelling, skip the pushdown and filter locally.
+                if all(mapped):
+                    params["publicationTypes"] = ",".join(mapped)
+            payload = self._get("/paper/search", params)
             items = self._data(payload)
             if not items:
                 break

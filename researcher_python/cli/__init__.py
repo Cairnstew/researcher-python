@@ -128,6 +128,24 @@ def build_parser() -> argparse.ArgumentParser:
                         help="only works published in YEAR or earlier")
     search.add_argument("--field", choices=SEARCH_FIELDS, default="any",
                         help="restrict matching to a field (default: any)")
+    search.add_argument("--type", "--types", dest="work_types", action="append",
+                        metavar="TYPE",
+                        help="only these work types (repeatable or comma-separated; "
+                        "source spellings like journal-article are accepted). "
+                        "An explicit list replaces the default exclusions")
+    search.add_argument("--exclude-type", dest="exclude_types", action="append",
+                        metavar="TYPE",
+                        help="also exclude this work type (repeatable); default "
+                        "exclusions are grant and standard")
+    search.add_argument("--no-default-exclude", dest="no_default_exclude",
+                        action="store_true",
+                        help="do not exclude grants/standards by default")
+    enrich_group = search.add_mutually_exclusive_group()
+    enrich_group.add_argument("--enrich", dest="force_enrich", action="store_true",
+                              help="force the OpenAlex missing-count/abstract "
+                              "backfill even when openalex was not searched")
+    enrich_group.add_argument("--no-enrich", dest="no_enrich", action="store_true",
+                              help="skip the OpenAlex backfill")
     search.add_argument("--min-score", dest="min_score", type=float, default=None,
                         metavar="F", help="drop merged records scoring below F (0.0-1.0); "
                         "the local relevance score from researcher_python.relevance "

@@ -56,6 +56,28 @@ def test_the_flow_counts_identification_duplicates_and_screening() -> None:
     assert report["by_source"] == {"crossref": 2, "openalex": 4}
 
 
+def test_type_exclusions_are_not_counted_as_duplicates() -> None:
+    papers = [_paper("10.1/a", "core"), _paper("10.1/b", "general")]
+    entry = {
+        "search_id": "s1",
+        "channel": "search",
+        "round": 1,
+        "by_source": {"openalex": 4},
+        "outcome": {
+            "returned": 2,
+            "kept": 2,
+            "dropped_types": 2,
+            "dropped_type_counts": {"grant": 1, "standard": 1},
+        },
+    }
+    report = prisma_report(papers, [entry])
+    assert report["identified"] == 4
+    assert report["type_excluded"] == 2
+    assert report["type_excluded_by_type"] == {"grant": 1, "standard": 1}
+    assert report["duplicates_removed"] == 0
+    assert report["unaccounted"] == 0
+
+
 def test_an_imported_set_without_a_log_is_reported_as_unaccounted() -> None:
     report = prisma_report([_paper("10.1/a"), _paper("10.1/b")], [])
     assert report["identified"] == 0
