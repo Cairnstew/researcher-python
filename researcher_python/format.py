@@ -37,6 +37,8 @@ from .models import Author, Paper
 __all__ = [
     "bibtex_entry",
     "bibtex_key",
+    "bibtex_key_map",
+    "bibtex_pairs",
     "csl_item",
     "harvard_author_sort_key",
     "harvard_citation",
@@ -401,13 +403,40 @@ def _unique_key(base: str, used: set[str]) -> str:
     return chosen
 
 
+def bibtex_pairs(papers: Iterable[Paper]) -> list[tuple[Paper, str, str]]:
+    """``(paper, unique key, rendered entry)`` for every record, in order.
+
+    This is the **single** pass that assigns keys.  :func:`render_bibtex` and
+    :func:`bibtex_key_map` both consume it, so a generated ``.bib`` and its
+    citation map can never disagree about a collision suffix.
+    """
+    used: set[str] = set()
+    pairs: list[tuple[Paper, str, str]] = []
+    for paper in papers:
+        key = _unique_key(bibtex_key(paper), used)
+        pairs.append((paper, key, bibtex_entry(paper, key)))
+    return pairs
+
+
+def bibtex_key_map(papers: Iterable[Paper]) -> dict[str, str]:
+    """``{primary id or folded title -> unique BibTeX key}``.
+
+    A downstream writer (a paper, a matrix, a handoff manifest) holds ids, not
+    citation keys.  This map is the bridge, and it is built from the same pass
+    as :func:`render_bibtex`, so it stays correct when two records share a
+    generated key.
+    """
+    mapping: dict[str, str] = {}
+    for paper, key, _entry in bibtex_pairs(papers):
+        identifier = paper.primary_id() or paper.title_key()
+        if identifier:
+            mapping[identifier] = key
+    return mapping
+
+
 def render_bibtex(papers: Iterable[Paper]) -> str:
     """All entries as one BibTeX string, keys made unique, input order kept."""
-    used: set[str] = set()
-    entries = [
-        bibtex_entry(paper, _unique_key(bibtex_key(paper), used)) for paper in papers
-    ]
-    return "\n".join(entries)
+    return "\n".join(entry for _paper, _key, entry in bibtex_pairs(papers))
 
 
 def render_ris(papers: Iterable[Paper]) -> str:

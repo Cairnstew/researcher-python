@@ -39,6 +39,7 @@ from .commands import (
     cmd_download,
     cmd_extract,
     cmd_get,
+    cmd_handoff,
     cmd_info,
     cmd_label,
     cmd_matrix,
@@ -320,6 +321,39 @@ def build_parser() -> argparse.ArgumentParser:
     prisma_parser.add_argument("--format", choices=("markdown", "json"), default="markdown")
     prisma_parser.add_argument("--out", metavar="FILE", default=None)
 
+    handoff_parser = sub.add_parser(
+        "handoff",
+        help="write a versioned research bundle for a paper-writing tool",
+    )
+    handoff_parser.add_argument(
+        "source", help="workspace directory, or a saved .json/.jsonl result file"
+    )
+    handoff_parser.add_argument("--out", required=True, metavar="DIR")
+    handoff_parser.add_argument(
+        "--labels",
+        default="core,general",
+        metavar="A,B",
+        help="triage labels to include (default: core,general)",
+    )
+    handoff_parser.add_argument(
+        "--allow-unscreened",
+        dest="require_screening",
+        action="store_false",
+        default=True,
+        help="write the bundle even if some records are still 'unreviewed'",
+    )
+    handoff_parser.add_argument(
+        "--no-prisma",
+        dest="include_prisma",
+        action="store_false",
+        default=True,
+        help="omit prisma.md (a result-file source has no log anyway)",
+    )
+    handoff_parser.add_argument("--force", action="store_true", help="overwrite an existing bundle")
+    handoff_parser.add_argument(
+        "--format", choices=("json", "text"), default="json", help="receipt format"
+    )
+
     _add_citation_parsers(sub)
     _add_bibliography_parser(sub)
     _add_matrix_parsers(sub)
@@ -569,6 +603,7 @@ _HANDLERS: dict[str, Handler] = {
     "prescreen": cmd_prescreen,
     "snowball": cmd_snowball,
     "prisma": cmd_prisma,
+    "handoff": cmd_handoff,
 }
 
 

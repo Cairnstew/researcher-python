@@ -29,13 +29,13 @@ import csv
 import io
 import os
 import re
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date
 from typing import TextIO
 
 from .errors import ExportError
 from .export import _atomic_text, _label
-from .format import _squash
+from .format import _squash, bibtex_key, bibtex_pairs
 from .models import TRIAGE_LABELS, Paper
 from .work_types import normalize_work_type
 
@@ -118,6 +118,7 @@ def _relevance(paper: Paper) -> str:
 #: Every column this module knows how to fill, name -> extractor.
 COLUMNS: dict[str, Callable[[Paper], str]] = {
     "key": _key,
+    "cite_key": bibtex_key,
     "label": lambda p: p.triage_label(),
     "authors": _authors,
     "year": _year,
@@ -197,11 +198,40 @@ def matrix_row(paper: Paper, columns: Sequence[str] | None = None) -> dict[str, 
 
 
 def matrix_rows(
-    papers: Iterable[Paper], columns: Sequence[str] | None = None
+    papers: Iterable[Paper],
+    columns: Sequence[str] | None = None,
+    *,
+    cite_keys: Mapping[str, str] | None = None,
 ) -> list[dict[str, str]]:
-    """Every row, in the order given (the caller's screening order is kept)."""
+    """Every row, in the order given (the caller's screening order is kept).
+
+    ``cite_key`` is made unique across the set by the same single pass that
+    renders ``references.bib`` (:func:`researcher_python.format.bibtex_pairs`),
+    so a matrix key and a citation key cannot disagree about a collision
+    suffix.  Pass ``cite_keys`` to reuse a map you already hold.
+    """
     names = _resolve(columns)
-    return [{name: COLUMNS[name](paper) for name in names} for paper in papers]
+    items = list(papers)
+    # Key by object identity for the generated case: two records with the same
+    # title and no identifier share a title_key, so an id->key map would lose
+    # one of them (and hand both rows the second key).
+    generated = (
+        {id(paper): key for paper, key, _entry in bibtex_pairs(items)}
+        if cite_keys is None and "cite_key" in names
+        else {}
+    )
+    mapping = dict(cite_keys) if cite_keys is not None else {}
+    rows: list[dict[str, str]] = []
+    for paper in items:
+        row = {name: COLUMNS[name](paper) for name in names}
+        if "cite_key" in row:
+            if cite_keys is None:
+                row["cite_key"] = generated.get(id(paper), row["cite_key"])
+            else:
+                identifier = paper.primary_id() or paper.title_key()
+                row["cite_key"] = mapping.get(identifier, row["cite_key"])
+        rows.append(row)
+    return rows
 
 
 # ---------------------------------------------------------------------- #
@@ -214,6 +244,7 @@ def render_matrix_csv(
     columns: Sequence[str] | None = None,
     *,
     require_screening: bool = False,
+    cite_keys: Mapping[str, str] | None = None,
 ) -> str:
     """The Literature Matrix as RFC-4180 CSV with a header row.
 
@@ -232,7 +263,7 @@ def render_matrix_csv(
         buffer, fieldnames=list(names), lineterminator="\n", quoting=csv.QUOTE_MINIMAL
     )
     writer.writeheader()
-    for row in matrix_rows(papers, names):
+    for row in matrix_rows(papers, names, cite_keys=cite_keys):
         writer.writerow(row)
     return buffer.getvalue()
 
@@ -248,6 +279,7 @@ def render_matrix_markdown(
     columns: Sequence[str] | None = None,
     *,
     require_screening: bool = False,
+    cite_keys: Mapping[str, str] | None = None,
 ) -> str:
     """The Literature Matrix as a GitHub-flavoured Markdown table.
 
@@ -256,7 +288,7 @@ def render_matrix_markdown(
     papers = list(papers)
     _gate(papers, require_screening)
     names = _resolve(columns)
-    rows = matrix_rows(papers, names)
+    rows = matrix_rows(papers, names, cite_keys=cite_keys)
     lines = [
         "| " + " | ".join(names) + " |",
         "| " + " | ".join("---" for _ in names) + " |",
@@ -547,9 +579,15 @@ def to_matrix_csv(
     columns: Sequence[str] | None = None,
     *,
     require_screening: bool = False,
+    cite_keys: Mapping[str, str] | None = None,
 ) -> None:
     """Write :func:`render_matrix_csv` to a path or an open file object."""
-    _write(render_matrix_csv(papers, columns, require_screening=require_screening), dest)
+    _write(
+        render_matrix_csv(
+            papers, columns, require_screening=require_screening, cite_keys=cite_keys
+        ),
+        dest,
+    )
 
 
 def to_matrix_markdown(
@@ -558,10 +596,16 @@ def to_matrix_markdown(
     columns: Sequence[str] | None = None,
     *,
     require_screening: bool = False,
+    cite_keys: Mapping[str, str] | None = None,
 ) -> None:
     """Write :func:`render_matrix_markdown` to a path or an open file object."""
     _write(
-        render_matrix_markdown(papers, columns, require_screening=require_screening),
+        render_matrix_markdown(
+            papers,
+            columns,
+            require_screening=require_screening,
+            cite_keys=cite_keys,
+        ),
         dest,
     )
 

@@ -321,6 +321,7 @@ class TestParserRegistration:
         "download": "10.1/a",
         "workspace": ["status", "ws"],
         "prisma": "ws",
+        "handoff": ["results.json", "--out", "/tmp/handoff"],
     }
 
     def test_every_subcommand_has_a_handler_and_parses(self) -> None:
@@ -336,7 +337,7 @@ class TestParserRegistration:
     def test_help_lists_the_new_subcommands(self) -> None:
         text = cli.build_parser().format_help()
         for name in ("bibliography", "matrix", "synthesis", "summary", "label",
-                     "screen", "prescreen", "snowball", "prisma",
+                     "screen", "prescreen", "snowball", "prisma", "handoff",
                      "references", "citations", "web-search", "extract"):
             assert name in text
 

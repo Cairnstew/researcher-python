@@ -39,7 +39,7 @@ from dataclasses import dataclass
 from typing import Any, Literal
 
 from . import __version__
-from . import citation, extract, format as bib, matrix, pipeline, relevance, web_sources
+from . import citation, extract, format as bib, handoff as handoff_mod, matrix, pipeline, relevance, web_sources
 from .config import Settings, load_settings
 from .download import download_pdf
 from .errors import ConfigurationError, ResearcherError
@@ -51,7 +51,7 @@ from .sources import DEFAULT_SOURCES, source_names
 from .web_sources import web_source_names
 from .workspace import Workspace, WorkspaceSearch
 
-__all__ = ["TOOLS", "build_server", "main", "server"]
+__all__ = ["LITE_TOOLS", "TOOLS", "build_server", "main", "server"]
 
 _SERVER_NAME = "researcher-python"
 _SERVER_INSTRUCTIONS = (
@@ -86,7 +86,14 @@ _SERVER_INSTRUCTIONS = (
     "csv|markdown), synthesis (dimension), screening (counts) or prisma "
     "(workspace only); screen_summary is an alias for screening. Check "
     "screening.ready or pass require_screening=True before treating a matrix "
-    "as screened. Prefer from_file/workspace over a live query for reports."
+    "as screened. Prefer from_file/workspace over a live query for reports.\n"
+    "\n"
+    "HANDOFF: handoff(source, out_dir) writes a versioned bundle (included "
+    "papers, references.bib, citation-map.json, matrix/synthesis/PRISMA) for "
+    "paper-handler research import. It refuses an unscreened set by default.\n"
+    "\n"
+    "PROFILE: RESEARCHER_MCP_PROFILE=lite registers only search/read/cite and "
+    "the workspace (no screening, download, extraction or handoff)."
 )
 
 #: Bibliography formats accepted by :func:`_bibliography`.
@@ -116,6 +123,34 @@ def _set_settings(settings: Settings | None) -> None:
     """Override the server settings (tests inject a fixture Settings)."""
     global _SETTINGS
     _SETTINGS = settings
+
+
+#: Tools dropped by ``RESEARCHER_MCP_PROFILE=lite``.  The lite profile is for
+#: the writing phase: search, read, cite and the workspace, without the
+#: screening/download/extraction surface a paper agent does not call.
+_LITE_EXCLUDED = frozenset(
+    {
+        "workspace_next_round",
+        "download_pdf",
+        "report",
+        "screen",
+        "prescreen",
+        "snowball",
+        "handoff",
+        "extract_text",
+        "find_quotes",
+    }
+)
+
+
+def _resolve_profile(profile: str | None = None) -> str:
+    """``full`` (default) or ``lite``; an unknown value is a config error."""
+    value = (profile or os.environ.get("RESEARCHER_MCP_PROFILE", "full")).strip().lower()
+    if value not in ("full", "lite"):
+        raise ConfigurationError(
+            f"RESEARCHER_MCP_PROFILE must be 'full' or 'lite', not {value!r}"
+        )
+    return value
 
 
 #: Session-default workspace (one stdio server per client, so process-global is
@@ -1298,6 +1333,48 @@ def _tool_prisma(
     return _ok(format="json", **report)
 
 
+def _tool_handoff(
+    source: str | None = None,
+    out_dir: str = "",
+    labels: list[str] | None = None,
+    require_screening: bool = True,
+    include_prisma: bool = True,
+    force: bool = False,
+) -> dict[str, Any]:
+    """Write a versioned research bundle for a paper-writing tool."""
+    if not out_dir:
+        return {
+            "ok": False,
+            "error": "ConfigurationError",
+            "message": "out_dir is required",
+        }
+    target = source
+    if not target:
+        workspace = _resolve_workspace(None)
+        if workspace is None:
+            return {
+                "ok": False,
+                "error": "ConfigurationError",
+                "message": (
+                    "no source given; pass source='workspace' or call "
+                    "open_workspace(path) first"
+                ),
+            }
+        target = str(workspace.path)
+    try:
+        return handoff_mod.build_handoff(
+            target,
+            out_dir,
+            settings=_settings(),
+            labels=labels,
+            require_screening=require_screening,
+            include_prisma=include_prisma,
+            force=force,
+        )
+    except ResearcherError as exc:
+        return _fail(exc)
+
+
 def _tool_extract_text(path: str, pages: str | None = None) -> dict[str, Any]:
     """Plain text of a local PDF, optionally a page range (``"1-5,10"``)."""
     try:
@@ -1580,9 +1657,13 @@ TOOLS = (
     "screen",
     "prescreen",
     "snowball",
+    "handoff",
     "extract_text",
     "find_quotes",
 )
+
+#: ``TOOLS`` minus the screening/download/extraction surface (see ``_LITE_EXCLUDED``).
+LITE_TOOLS = tuple(name for name in TOOLS if name not in _LITE_EXCLUDED)
 
 
 # ---------------------------------------------------------------------- #
@@ -1590,12 +1671,15 @@ TOOLS = (
 # ---------------------------------------------------------------------- #
 
 
-def build_server(settings: Settings | None = None):
-    """Create the :class:`FastMCP` server and register every tool.
+def build_server(settings: Settings | None = None, profile: str | None = None):
+    """Create the :class:`FastMCP` server and register every enabled tool.
 
     ``settings`` overrides the environment-loaded settings (tests use it).
-    Raises a clear error when the optional ``mcp`` dependency is absent.
+    ``profile`` is ``full`` (default) or ``lite``; when omitted,
+    ``RESEARCHER_MCP_PROFILE`` decides.  Raises a clear error when the optional
+    ``mcp`` dependency is absent or the profile is unknown.
     """
+    active_profile = _resolve_profile(profile)
     try:
         from mcp.server.fastmcp import FastMCP
     except ImportError as exc:  # pragma: no cover - depends on install extras
@@ -1613,19 +1697,27 @@ def build_server(settings: Settings | None = None):
         instructions=_SERVER_INSTRUCTIONS,
     )
 
+    excluded = _LITE_EXCLUDED if active_profile == "lite" else frozenset()
+
+    def register(fn):
+        """Register a tool unless the active profile excludes it."""
+        if fn.__name__ in excluded:
+            return fn
+        return server.tool()(fn)
+
     # --- discovery -----------------------------------------------------
-    @server.tool()
+    @register
     def sources() -> dict:
         """List every registered source (scholarly + web) and its capabilities."""
         return _tool_sources()
 
-    @server.tool()
+    @register
     def info() -> dict:
         """Report package version and effective settings (secrets as set/unset)."""
         return _tool_info()
 
     # --- workspace (state + provenance) --------------------------------
-    @server.tool()
+    @register
     def open_workspace(
         path: str, create: bool = True, round: int | None = None
     ) -> dict:
@@ -1638,17 +1730,17 @@ def build_server(settings: Settings | None = None):
         """
         return _tool_open_workspace(path, create, round)
 
-    @server.tool()
+    @register
     def workspace_status(workspace: str | None = None) -> dict:
         """Counts, round, provenance and file paths for a workspace."""
         return _tool_workspace_status(workspace)
 
-    @server.tool()
+    @register
     def close_workspace() -> dict:
         """Clear the session-default workspace (searches stop persisting)."""
         return _tool_close_workspace()
 
-    @server.tool()
+    @register
     def workspace_next_round(
         label: str = "", workspace: str | None = None
     ) -> dict:
@@ -1656,7 +1748,7 @@ def build_server(settings: Settings | None = None):
         return _tool_workspace_next_round(label, workspace)
 
     # --- scholarly core ------------------------------------------------
-    @server.tool()
+    @register
     def search_papers(
         query: str,
         sources: list[str] | None = None,
@@ -1711,12 +1803,12 @@ def build_server(settings: Settings | None = None):
             offset=offset,
         )
 
-    @server.tool()
+    @register
     def get_paper(identifier: str, source: str | None = None) -> dict:
         """Fetch one paper by DOI, arXiv id, or PMID (optionally a fixed source)."""
         return _tool_get(identifier, source)
 
-    @server.tool()
+    @register
     def references(
         identifier: str,
         sources: list[str] | None = None,
@@ -1727,7 +1819,7 @@ def build_server(settings: Settings | None = None):
         """Works that the given paper references (merged across sources)."""
         return _tool_citations(identifier, "references", sources, limit, order, strict)
 
-    @server.tool()
+    @register
     def citations(
         identifier: str,
         sources: list[str] | None = None,
@@ -1738,12 +1830,12 @@ def build_server(settings: Settings | None = None):
         """Works that cite the given paper (merged across sources)."""
         return _tool_citations(identifier, "citations", sources, limit, order, strict)
 
-    @server.tool()
+    @register
     def download_pdf(identifier: str, output_dir: str | None = None) -> dict:
         """Download the open-access PDF for one paper (Unpaywall fallback)."""
         return _tool_download(identifier, output_dir)
 
-    @server.tool()
+    @register
     def bibliography(
         identifiers: list[str] | None = None,
         query: str | None = None,
@@ -1767,7 +1859,7 @@ def build_server(settings: Settings | None = None):
         )
 
     # --- web sources ---------------------------------------------------
-    @server.tool()
+    @register
     def web_search(
         query: str,
         source: str = "stackoverflow",
@@ -1783,7 +1875,7 @@ def build_server(settings: Settings | None = None):
         )
 
     # --- screening and reports ----------------------------------------
-    @server.tool()
+    @register
     def report(
         kind: Literal[
             "matrix", "synthesis", "screening", "prisma", "screen_summary"
@@ -1823,7 +1915,7 @@ def build_server(settings: Settings | None = None):
             workspace=workspace,
         )
 
-    @server.tool()
+    @register
     def screen(
         from_file: str | None = None,
         set_label: str | None = None,
@@ -1855,7 +1947,7 @@ def build_server(settings: Settings | None = None):
             strict=strict,
         )
 
-    @server.tool()
+    @register
     def prescreen(
         from_file: str | None = None,
         workspace: str | None = None,
@@ -1890,7 +1982,7 @@ def build_server(settings: Settings | None = None):
             out_file=out_file,
         )
 
-    @server.tool()
+    @register
     def snowball(
         workspace: str | None = None,
         direction: str = "both",
@@ -1925,12 +2017,37 @@ def build_server(settings: Settings | None = None):
         )
 
     # --- PDF text ------------------------------------------------------
-    @server.tool()
+    @register
+    def handoff(
+        source: str | None = None,
+        out_dir: str = "",
+        labels: list[str] | None = None,
+        require_screening: bool = True,
+        include_prisma: bool = True,
+        force: bool = False,
+    ) -> dict:
+        """Write a versioned research bundle for a paper-writing tool.
+
+        Includes only ``core`` + ``general`` by default, renders the bibliography
+        and a citation-key map from one pass, and refuses an unscreened set
+        unless ``require_screening=False``. The bundle is designed for
+        ``paper-handler research import`` and contains no network side effects.
+        """
+        return _tool_handoff(
+            source,
+            out_dir,
+            labels,
+            require_screening,
+            include_prisma,
+            force,
+        )
+
+    @register
     def extract_text(path: str, pages: str | None = None) -> dict:
         """Plain text of a local PDF; ``pages`` selects a range like "1-5,10"."""
         return _tool_extract_text(path, pages)
 
-    @server.tool()
+    @register
     def find_quotes(
         path: str,
         terms: str | None = None,

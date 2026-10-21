@@ -341,6 +341,7 @@ def test_opencode_config_command_can_actually_start_the_server():
             "extract_text",
             "find_quotes",
             "get_paper",
+            "handoff",
             "info",
             "open_workspace",
             "prescreen",

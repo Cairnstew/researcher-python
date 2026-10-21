@@ -61,6 +61,8 @@ from .export import (
 from .format import (
     bibtex_entry,
     bibtex_key,
+    bibtex_key_map,
+    bibtex_pairs,
     csl_item,
     render_bibtex,
     render_csl_json,
@@ -110,6 +112,7 @@ from .models import (
     sort_papers,
 )
 from .prisma import prisma_report, render_prisma_markdown
+from .handoff import DEFAULT_LABELS, HANDOFF_SCHEMA_VERSION, build_handoff
 from .work_types import (
     CANONICAL_WORK_TYPES,
     DEFAULT_SEARCH_EXCLUDE_TYPES,
@@ -239,6 +242,10 @@ __all__ = [
     # PRISMA
     "prisma_report",
     "render_prisma_markdown",
+    # research handoff (paper-writing bundle)
+    "DEFAULT_LABELS",
+    "HANDOFF_SCHEMA_VERSION",
+    "build_handoff",
     # workspace (state + provenance)
     "LOG_JSONL",
     "LOG_MD",
@@ -272,6 +279,8 @@ __all__ = [
     # format (bibliography)
     "bibtex_entry",
     "bibtex_key",
+    "bibtex_key_map",
+    "bibtex_pairs",
     "csl_item",
     "render_bibtex",
     "render_csl_json",

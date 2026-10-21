@@ -24,7 +24,7 @@ import pytest
 import researcher_python.mcp_server as mcp_mod
 import researcher_python.sources as registry
 from researcher_python.config import Settings
-from researcher_python.errors import NotFoundError, SourceError
+from researcher_python.errors import ConfigurationError, NotFoundError, SourceError
 from researcher_python.models import Author, Paper
 from researcher_python.sources.base import Capabilities, Source
 
@@ -494,6 +494,35 @@ def test_build_server_registers_every_declared_tool():
         return sorted(t.name for t in await server.list_tools())
 
     assert asyncio.run(names()) == sorted(mcp_mod.TOOLS)
+
+
+def test_build_server_lite_profile_omits_the_optional_surface():
+    _require_mcp()
+    server = mcp_mod.build_server(Settings(), profile="lite")
+
+    async def names():
+        return sorted(t.name for t in await server.list_tools())
+
+    assert asyncio.run(names()) == sorted(mcp_mod.LITE_TOOLS)
+    assert set(mcp_mod.LITE_TOOLS) < set(mcp_mod.TOOLS)
+    assert "handoff" not in mcp_mod.LITE_TOOLS
+    assert "search_papers" in mcp_mod.LITE_TOOLS
+
+
+def test_lite_profile_can_come_from_the_environment(monkeypatch):
+    _require_mcp()
+    monkeypatch.setenv("RESEARCHER_MCP_PROFILE", "LITE")
+    assert mcp_mod.build_server(Settings())._tool_manager is not None
+    assert sorted(
+        t.name
+        for t in asyncio.run(mcp_mod.build_server(Settings()).list_tools())
+    ) == sorted(mcp_mod.LITE_TOOLS)
+
+
+def test_unknown_profile_is_a_configuration_error():
+    _require_mcp()
+    with pytest.raises(ConfigurationError, match="RESEARCHER_MCP_PROFILE"):
+        mcp_mod.build_server(Settings(), profile="skinny")
 
 
 def test_tools_list_payload_stays_within_the_context_budget():

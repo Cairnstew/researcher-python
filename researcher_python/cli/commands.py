@@ -25,6 +25,7 @@ from .. import citation, download, export, format as bib, matrix, pipeline
 from .. import __version__
 from ..config import ENV_KEYS, Settings
 from ..errors import ConfigurationError, ResearcherError, SourceUnavailableError
+from ..handoff import build_handoff
 from ..models import Paper
 from ..prisma import render_prisma_markdown
 from ..screening import (
@@ -50,6 +51,7 @@ __all__ = [
     "cmd_download",
     "cmd_extract",
     "cmd_get",
+    "cmd_handoff",
     "cmd_info",
     "cmd_label",
     "cmd_matrix",
@@ -1153,6 +1155,35 @@ def cmd_prisma(args: argparse.Namespace, settings: Settings) -> int:
         print(f"wrote {out}", file=sys.stderr)
     else:
         print(text, end="")
+    return 0
+
+
+def cmd_handoff(args: argparse.Namespace, settings: Settings) -> int:
+    """Write a versioned research bundle for a paper-writing tool."""
+    raw_labels = getattr(args, "labels", "core,general") or "core,general"
+    labels = tuple(item.strip() for item in raw_labels.split(",") if item.strip())
+    receipt = build_handoff(
+        args.source,
+        args.out,
+        settings=settings,
+        labels=labels,
+        require_screening=getattr(args, "require_screening", True),
+        include_prisma=getattr(args, "include_prisma", True),
+        force=getattr(args, "force", False),
+    )
+    if getattr(args, "format", "json") == "json":
+        print(json.dumps(receipt, indent=2, ensure_ascii=False))
+        return 0
+
+    counts = receipt["counts"]
+    print(f"handoff: {receipt['out_dir']}")
+    print(f"included: {counts['included']} of {counts['records']} records")
+    print(
+        "screening: "
+        + ("ready" if receipt["screening"]["ready"] else "incomplete")
+    )
+    for name, path in receipt["files"].items():
+        print(f"  {name}: {path}")
     return 0
 
 

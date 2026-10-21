@@ -397,3 +397,27 @@ class TestTypeNormalisation:
         rows = {r["type"]: r for r in matrix.synthesis_matrix(
             [Paper(doi="10.1/x", title="x")], "type")}
         assert rows["(unknown)"]["total"] == "1"
+
+
+def test_cite_key_column_is_unique_across_collisions() -> None:
+    first = Paper(year=2020, title="Same title", authors=[Author("Smith, Ann")])
+    second = Paper(year=2020, title="Same title", authors=[Author("Smith, Ann")])
+    rows = matrix.matrix_rows([first, second], ("cite_key",))
+    assert [row["cite_key"] for row in rows] == ["smith2020same", "smith2020samea"]
+
+
+def test_cite_key_can_reuse_a_supplied_map() -> None:
+    paper = _core()
+    identifier = paper.primary_id()
+    rows = matrix.matrix_rows(
+        [paper], ("cite_key",), cite_keys={identifier: "custom2020"}
+    )
+    assert rows[0]["cite_key"] == "custom2020"
+
+
+def test_cite_key_renders_in_csv_and_markdown() -> None:
+    text = matrix.render_matrix_csv([_core()], ("cite_key", "title"))
+    assert text.splitlines()[0] == "cite_key,title"
+    assert "smith2020" in text.splitlines()[1]
+    md = matrix.render_matrix_markdown([_core()], ("cite_key", "title"))
+    assert md.splitlines()[0].startswith("| cite_key | title |")

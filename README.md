@@ -274,6 +274,7 @@ workspace with no log has no honest identification count.
 | `prescreen` | flag obvious exclusions by rule; report by default, `--apply` writes them |
 | `snowball` | expand a core set through references/citations, ranked by link count |
 | `prisma` | PRISMA-style flow counts from the workspace log and labels |
+| `handoff` | write a versioned research bundle for `paper-handler` (included records only) |
 | `workspace` | create / inspect / log / round / export / import a workspace |
 | `web-search` | Stack Overflow / Reddit records |
 | `extract` | PDF text, or page-anchored quotes |
@@ -619,7 +620,39 @@ $ python -m researcher_python workspace import research-out/cw1 \
       --log cw1-round3-search-log.md --round 3 --mode merge --dry-run
 ```
 
-### Citations
+### Handing research to a paper writer
+
+A workspace is the right home for research state, but a manuscript should not
+read it directly: `results.json` still contains `excluded`/`unreviewed`
+records, and a matrix row is keyed by a DOI/arXiv id rather than a BibTeX key.
+`handoff` writes one small, versioned directory that resolves both:
+
+```console
+$ researcher_python handoff research-out/cw1 --out research-out/cw1-handoff
+$ researcher_python handoff results.json --out /tmp/handoff --allow-unscreened
+```
+
+```
+handoff/
+  handoff.json          # schema_version, source, counts, screening, file index
+  papers.json           # included records, export envelope schema 1
+  references.bib        # included records only, unique keys
+  citation-map.json     # primary id / folded title -> citation key
+  matrix.md             # literature matrix with a cite_key column
+  synthesis.md          # dimension x triage-label counts
+  prisma.md             # screening flow (workspace sources only)
+  README.md             # counts + regeneration command
+```
+
+By default only `core` and `general` records are included; `excluded` and
+`unreviewed` never reach the bibliography. `--labels` changes the set. An
+unscreened workspace is refused unless `--allow-unscreened` is passed, because
+a manuscript built from a search dump is not a screened paper. The bibliography
+and `citation-map.json` come from the same key-assignment pass, so a collision
+suffix cannot differ between them.
+
+This bundle is the input to `paper-handler research import`; the two projects
+share the file contract, not a runtime dependency.
 
 `references(paper)` and `citations(paper)` fan a citation query across the
 sources that declare the matching `Capabilities` flag (OpenAlex and Semantic
@@ -699,7 +732,7 @@ papers = rp.search("AI governance", sources=["openalex"]).papers
 print(rp.column_names())
 # ['key', 'label', 'authors', 'year', 'title', ... 'exclusion_reason', 'notes']
 
-rp.to_matrix_csv(papers, "matrix.csv", columns=("key", "label", "year", "title"))
+rp.to_matrix_csv(papers, "matrix.csv", columns=("key", "cite_key", "label", "year", "title"))
 rp.to_synthesis_markdown(papers, "synthesis.md", dimension="venue")
 print(rp.screen_summary(papers))
 # {'unreviewed': 2, 'core': 0, 'general': 0, 'excluded': 0, 'total': 2}
@@ -713,7 +746,11 @@ A conference,1,1,2,2,6
 ```
 
 Columns are named extractors over `Paper` (`rp.column_names()` lists them all),
-so adding one needs no change to the module. `score` is available but *not* a
+so adding one needs no change to the module. `cite_key` is the exception to the
+per-paper extractor rule: `matrix_rows` assigns it through the same
+`format.bibtex_pairs` pass that renders `references.bib`, so two papers that
+generate the same base key get the same `a`/`b` suffix in the matrix and the
+bibliography. Pass `cite_keys=` when you already hold the map. `score` is available but *not* a
 default column — most records in a hand-built or `get`-sourced set were never
 scored, and a column empty for every row is noise — so opt into it with
 `--columns key,label,score,title,notes` when the set came from a scored search.
@@ -972,6 +1009,7 @@ The Nix package enables all runtime extras (`mcp` and `pdf`) by default, so
 | `screen` | set labels / notes on a saved set or workspace; accepts a batch | `screening.apply_updates` |
 | `prescreen` | flag obvious exclusions by rule (report by default) | `screening.prescreen` |
 | `snowball` | expand the core set through the citation graph | `snowball.expand` |
+| `handoff` | write a versioned bundle for `paper-handler` (included records only) | `handoff.build_handoff` |
 | `report` | one report tool: `kind=` matrix, synthesis, screening or prisma | `matrix.*` / `prisma.prisma_report` |
 | `extract_text` | plain text of a local PDF | `extract.extract_text` |
 | `find_quotes` | page-anchored quotes from a PDF | `extract.find_quotes` |
@@ -990,6 +1028,33 @@ replaces the duplicate `label` tool):
 `screen_summary` is accepted as an alias for `screening`. A kind-specific
 argument used with the wrong kind is a `ConfigurationError`, not a silent
 no-op (e.g. `columns` with matrix only, `dimension` with synthesis only).
+
+### Lite profile for the writing phase
+
+A paper-writing agent needs search, read, cite and the workspace — not the
+screening, download, extraction or handoff surface. Set
+`RESEARCHER_MCP_PROFILE=lite` to register only:
+
+`sources`, `info`, `open_workspace`, `workspace_status`, `close_workspace`,
+`search_papers`, `get_paper`, `references`, `citations`, `bibliography`,
+`web_search`.
+
+The default is `full`; an unknown value is a `ConfigurationError`. The drop
+list lives in `mcp_server._LITE_EXCLUDED`, and `LITE_TOOLS` is the exact
+registered set (tests assert it).
+
+```jsonc
+{
+  "mcp": {
+    "researcher": {
+      "type": "local",
+      "command": ["researcher-python-mcp"],
+      "env": { "RESEARCHER_MCP_PROFILE": "lite" },
+      "timeout": 120000
+    }
+  }
+}
+```
 
 Example client configuration (spawns the console script over stdio):
 
