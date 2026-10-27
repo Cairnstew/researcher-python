@@ -23,7 +23,11 @@ researcher-python-mcp = "researcher_python.mcp_server:main"
 
 [project.optional-dependencies]
 mcp = [
-    "mcp>=1.9",
+    # mcp 2.x renamed mcp.server.fastmcp -> mcp.server.mcpserver; the server
+    # still imports FastMCP, so hold the v1 API until the migration lands.
+    # Without this bound the dev shell installs 2.x and the server fails to
+    # start (opencode drops it as "server unavailable").
+    "mcp>=1.9,<2",
 ]
 # PDF text extraction.  Optional: the whole package works without it, and only
 # `extract` / the `extract_text` + `find_quotes` tools need it.
