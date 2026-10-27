@@ -17,6 +17,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+import subprocess
+import sys
 from typing import Any
 
 import pytest
@@ -30,10 +32,23 @@ from researcher_python.sources.base import Capabilities, Source
 
 
 def _require_mcp():
-    """Import ``FastMCP`` or skip the test when the optional extra is absent."""
-    return pytest.importorskip(
-        "mcp.server.fastmcp", reason="the 'mcp' extra is not installed"
-    )
+    """Import ``FastMCP``, skipping only when the optional extra is absent.
+
+    A *present* but incompatible ``mcp`` must fail, not skip: mcp 2.x renamed
+    ``mcp.server.fastmcp`` to ``mcp.server.mcpserver``, and an importorskip here
+    silently disabled the whole MCP surface (the server then failed to start in
+    every opencode session while the suite stayed green).
+    """
+    pytest.importorskip("mcp", reason="the 'mcp' extra is not installed")
+    try:
+        from mcp.server.fastmcp import FastMCP
+    except ModuleNotFoundError as exc:  # pragma: no cover - version-skew guard
+        pytest.fail(
+            "installed mcp has no mcp.server.fastmcp (mcp 2.x renamed it to "
+            "mcp.server.mcpserver). Pin 'mcp<2' or migrate the server; do not "
+            f"let this skip. Original error: {exc}"
+        )
+    return FastMCP
 
 
 # ---------------------------------------------------------------------- #
@@ -756,3 +771,48 @@ def test_workspace_and_from_file_is_ambiguous(tmp_path):
     assert payload["ok"] is False
     assert payload["error"] == "ConfigurationError"
     assert "do not also pass" in payload["message"]
+
+
+def test_server_entry_point_handshakes_and_lists_every_tool():
+    """The packaged entry point must start and answer tools/list over stdio.
+
+    This is the regression test for the failure that mattered: under mcp 2.x
+    the server died before the handshake, opencode dropped it as
+    "server unavailable", and the suite still passed because the import-based
+    tests skipped. A subprocess exercises the same path a client does.
+    """
+    _require_mcp()
+    requests = [
+        {
+            "jsonrpc": "2.0",
+            "id": 1,
+            "method": "initialize",
+            "params": {
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "smoke", "version": "1"},
+            },
+        },
+        {"jsonrpc": "2.0", "method": "notifications/initialized", "params": {}},
+        {"jsonrpc": "2.0", "id": 2, "method": "tools/list", "params": {}},
+    ]
+    proc = subprocess.run(
+        [sys.executable, "-m", "researcher_python.mcp_server"],
+        input="\n".join(json.dumps(r) for r in requests) + "\n",
+        text=True,
+        capture_output=True,
+        timeout=30,
+    )
+    assert proc.returncode == 0, f"server exited {proc.returncode}: {proc.stderr[-1200:]}"
+
+    responses = {}
+    for line in proc.stdout.splitlines():
+        if not line.strip():
+            continue
+        message = json.loads(line)
+        if "id" in message:
+            responses[message["id"]] = message
+
+    assert responses[1]["result"]["serverInfo"]["name"] == "researcher-python"
+    names = {tool["name"] for tool in responses[2]["result"]["tools"]}
+    assert names == set(mcp_mod.TOOLS)
