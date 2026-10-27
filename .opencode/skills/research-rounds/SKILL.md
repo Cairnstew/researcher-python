@@ -140,21 +140,26 @@ Run rounds until **saturation**: a round that surfaces no materially new
 sources, terms, or changes to your understanding. Say explicitly when
 saturation is reached and why.
 
-## Division of labour (non-negotiable)
+## Division of labour
 
-The loop needs hands and brain: get your own keywords, do the
-{Search – Download – Read – Write}, build your own understanding.
+The loop needs three things: search, reading, and judgment. Split them so
+neither side becomes the bottleneck.
 
-- **The human owns**: the idea/topic, judging whether keywords represent it,
-  reading, and the resulting understanding/judgment.
-- **You (the assistant) are tooling inside the loop**: execute searches,
-  fetch and summarize sources, mine candidate terms from texts, format and
-  keep the round log, spot gaps.
-- **Never** produce a finished write-up that substitutes for the human's
-  read-and-write step, and never offer a shortcut that bypasses the loop —
-  comprehension and source integrity are not guaranteed by one.
-- Summaries you provide are leads and orientation; the human still Reads the
-  sources themselves before the understanding counts as theirs.
+- **The human owns**: the idea/topic, the constraints, the judgment of whether
+  a source actually supports a claim, and the final argument and voice.
+- **You (the assistant) own the mechanics**: derive candidate keywords, run the
+  searches, download the open-access PDFs, extract the text, read the sources,
+  and write the per-source notes and the matrix. Reading is part of your job —
+  the tooling exists (`download_pdf`, `extract_text`, `pdf-mcp`) precisely so a
+  round does not end with "now you read these".
+- **The human audits, rather than performs, the reading**: give them one note
+  per paper (method, finding, which report section it serves, confidence) so
+  they can check your judgment instead of re-reading 40 PDFs to discover what
+  you found.
+- **Never** produce a finished submission that substitutes for the human's own
+  argument: drafts are drafts, and the human decides what the report claims.
+  There is no shortcut around the loop — comprehension and source integrity are
+  not guaranteed by one.
 
 ## Running a session
 
@@ -194,13 +199,15 @@ query.
 - **Download**: `researcher_download_pdf` for the open-access PDFs (abstracts
   at minimum for triage). Keep a source list with identifiers
   (DOI/arXiv id/PMID + local path).
-- **Read**: read the retrieved sources — abstracts+conclusions at minimum for
-  triage, methods/results for the keepers; open local PDFs with `pdf-mcp` and
-  HTML with `webfetch`. Summarize for the user, but mark clearly that
-  user-reading is still owed on the keepers.
-- **Write**: append notes per source to the round's notes file (see
-  *Round log* below). The human's understanding is only "updated" once
-  something is written down.
+- **Read**: actually read the retrieved sources — abstracts+conclusions at
+  minimum for triage, methods/results for the keepers. Open local PDFs with
+  `pdf-mcp` and HTML with `webfetch`. Do **not** hand the reading back to the
+  user: produce one note per paper (method, finding, relevance, section it
+  serves) and flag thin or abstract-only evidence. The note is what the user
+  audits; an unread paper is reported as unread, never as read.
+- **Write**: append those notes per source to the round's notes file (see
+  *Round log* below). Understanding is only "updated" once something is
+  written down.
 
 ### 3. Update understanding → refine → next round
 
